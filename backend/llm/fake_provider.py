@@ -23,8 +23,11 @@ class FakeProvider:
         self.chat_calls: list[dict] = []
         self.prompt_version = None
 
-    def chat(self, messages, tools=None, purpose="chat") -> ChatResult:
-        self.chat_calls.append({"messages": list(messages), "tools": tools})
+    def chat(self, messages, tools=None, purpose="chat", response_format=None) -> ChatResult:
+        self.chat_calls.append(
+            {"messages": list(messages), "tools": tools, "purpose": purpose,
+             "response_format": response_format}
+        )  # fmt: skip
         return self.script.pop(0)
 
     def chat_stream(self, messages, tools=None, on_delta=None, purpose="chat") -> ChatResult:

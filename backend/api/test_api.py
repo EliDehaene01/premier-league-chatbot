@@ -100,3 +100,17 @@ def test_health_and_suggestions(client):
     assert h["db"] and h["table_after_matchweek"] == 1 and h["indexed_chunks"] == 0
     s = client.get("/api/suggestions").json()["suggestions"]
     assert s[0] == "Who is top of the league?" and any("Havertz" in q for q in s)
+
+
+def test_latest_digests(client, db):
+    assert client.get("/api/digests/latest").json() == {}
+    for headline in ("Old recap", "New recap"):
+        db.execute(
+            "INSERT INTO digests (kind, period_key, headline, content, facts) "
+            "VALUES ('matchweek_recap', 'mw1', %s, '{\"sections\": []}', "
+            '\'{"table": {"after_matchweek": 1, "rows": []}}\')',
+            (headline,),
+        )
+    out = client.get("/api/digests/latest").json()
+    assert list(out) == ["matchweek_recap"] and out["matchweek_recap"]["headline"] == "New recap"
+    assert out["matchweek_recap"]["table"]["after_matchweek"] == 1

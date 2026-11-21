@@ -227,3 +227,6 @@ logs/
 
 # eval run outputs
 evals/results/
+
+# gh-pages worktree used by python -m digests publish
+.site/

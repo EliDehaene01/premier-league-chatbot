@@ -1,0 +1,11 @@
+# Minimums for `python -m evals.digests`; it exits non-zero below any value that is set.
+# null = report only: no digest run has been measured yet. After the first full run, set each
+# to the measured score minus one case of slack (as in thresholds.yaml), and never lower one.
+checks:
+  citations: null      # every kept line cites at least one resolvable source
+  scores_match: null   # every score in a kept line equals its cited match's score
+  coverage: null       # recap: every played fixture is in the digest
+  must_mention: null   # the hand-labelled stories or clubs appear
+  format: null         # headline length, section and bullet counts
+  kept_rate: null      # share of model-written lines that survived validation
+  faithfulness: null   # judge: each line is supported by the facts or articles it cites

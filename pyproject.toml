@@ -25,10 +25,11 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["ingestion*", "backend*", "evals*"]
+include = ["ingestion*", "backend*", "evals*", "digests*"]
 
 [tool.setuptools.package-data]
 "backend.prompts" = ["*.md"]
+"digests" = ["*.yaml"]
 
 [tool.ruff]
 line-length = 100

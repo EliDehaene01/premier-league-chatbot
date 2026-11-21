@@ -110,3 +110,26 @@ export interface Health {
   table_after_matchweek?: number | null
   indexed_chunks?: number
 }
+
+export interface DigestItem {
+  text: string
+  sources: string[]
+  cites?: number[]
+}
+
+export interface Digest {
+  id: number
+  kind: "matchweek_recap" | "news_highlights"
+  period_key: string
+  created_at: string
+  headline: string
+  content: {
+    intro: DigestItem | null
+    sections: Array<{ title: string; bullets: DigestItem[]; generated_by?: string }>
+  }
+  sources: Source[]
+  table?: {
+    after_matchweek: number
+    rows: Array<{ position: number; club: string; played: number; goal_difference: number; points: number; places_gained: number }>
+  } | null
+}

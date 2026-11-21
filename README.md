@@ -47,6 +47,18 @@ cd frontend && npm ci && npm run dev                          # UI on http://loc
 
 Frontend checks: `npm run lint`, `npm test`, `npm run build`.
 
+## Weekly digests
+
+```bash
+python -m digests recap                  # matchweek recap for the latest complete matchweek
+python -m digests news                   # news highlights for the past 7 days
+python -m digests publish --out preview  # render the GitHub Pages site into a folder
+python -m digests publish --push         # commit it to the gh-pages branch and push
+python -m evals.digests                  # digest evals on past weeks
+```
+
+The scheduled runs (`scripts/schedule_windows.ps1`) write and publish them on Tuesday and Friday mornings. GitHub Pages serves the `gh-pages` branch (Settings > Pages > Deploy from a branch).
+
 ## Evals
 
 ```bash
@@ -72,5 +84,5 @@ Each ingestion mode ends with data-quality checks and exits non-zero if one fail
 | 2 | RAG + tools + chat loop | done |
 | 3 | Evals dataset | done |
 | 4 | API + React UI + structured citations | done |
-| 5 | Weekly digests (GitHub Pages) + own MCP server | next |
+| 5 | Weekly digests (GitHub Pages) + own MCP server | in progress |
 | 6 | AI Ops: tracing, CI eval gate, dashboards, feedback | |

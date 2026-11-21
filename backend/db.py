@@ -231,6 +231,24 @@ CREATE TABLE IF NOT EXISTS public.feedback (
 );
 
 -- gold: what the chatbot's tools read
+-- weekly digests (matchweek recap, news highlights); a re-run adds a row, the newest one wins
+CREATE TABLE IF NOT EXISTS public.digests (
+    id             bigserial PRIMARY KEY,
+    kind           text NOT NULL CHECK (kind IN ('matchweek_recap', 'news_highlights')),
+    period_key     text NOT NULL,           -- 'mw12' or the week's Friday, '2026-11-20'
+    period_start   timestamptz,
+    period_end     timestamptz,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    headline       text NOT NULL,
+    content        jsonb NOT NULL,          -- {intro, sections: [{title, bullets}]}
+    sources        jsonb NOT NULL DEFAULT '[]',  -- [{n, id, kind, title, date, url}]
+    facts          jsonb NOT NULL,          -- what code gathered, for evals and audits
+    checks         jsonb NOT NULL DEFAULT '{}',  -- validation results (dropped bullets, ...)
+    prompt_version text,
+    cost_usd       numeric(12, 6)
+);
+CREATE INDEX IF NOT EXISTS digests_kind_idx ON public.digests (kind, period_key, created_at DESC);
+
 CREATE OR REPLACE VIEW gold.league_table_current AS
 SELECT s.position, c.name AS club, s.club_id, s.played, s.won, s.drawn, s.lost,
        s.goals_for, s.goals_against, s.goals_for - s.goals_against AS goal_difference,

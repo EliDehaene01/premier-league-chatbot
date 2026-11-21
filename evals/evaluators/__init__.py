@@ -140,21 +140,8 @@ def tool_selection(case: dict, t: dict, conn=None) -> Check:
 
 # ---------- numbers must come from tools
 
-SEASON = re.compile(r"\b20\d\d[-/](?:20)?\d\d\b")
-URL = re.compile(r"https?://\S+")
-LIST_MARKER = re.compile(r"^\s*\d+[.)]\s", re.MULTILINE)
-CITATION_MARKER = re.compile(r"\[\d+\]")
-NUMBER = re.compile(r"(?<![\w.])\d+(?:\.\d+)?")
-
-
-def _norm_num(n: str) -> str:
-    return format(Decimal(n).normalize(), "f")
-
-
-def numbers(text: str) -> set[str]:
-    text = CITATION_MARKER.sub(" ", text)
-    text = LIST_MARKER.sub(" ", SEASON.sub(" ", URL.sub(" ", text)))
-    return {_norm_num(n) for n in NUMBER.findall(text.replace(",", ""))}
+# shared with the digest validator, which runs the same check on every digest bullet
+from backend.llm.grounding import _norm_num, numbers  # noqa: E402
 
 
 def no_ungrounded_numbers(case: dict, t: dict, context_numbers=frozenset()) -> Check:

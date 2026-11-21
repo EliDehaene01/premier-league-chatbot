@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Chat } from "@/components/Chat"
 import { HealthBadge } from "@/components/HealthBadge"
+import { ThisWeek } from "@/components/ThisWeek"
 import { getHealth } from "@/lib/api"
 import type { Health } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -71,12 +72,7 @@ export default function App() {
         {view === "chat" ? (
           <Chat />
         ) : (
-          <section className="mx-auto max-w-2xl px-4 py-16 text-center">
-            <h2 className="text-lg font-semibold">This week</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              The Tuesday matchweek recap and Friday news highlights land here in the next phase.
-            </p>
-          </section>
+          <ThisWeek />
         )}
       </main>
     </div>

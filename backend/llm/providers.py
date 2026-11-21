@@ -28,7 +28,11 @@ class ChatResult:
 
 class LLMProvider(Protocol):
     def chat(
-        self, messages: list[dict], tools: list[dict] | None = None, purpose: str = "chat"
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        purpose: str = "chat",
+        response_format: dict | None = None,
     ) -> ChatResult: ...
 
     def embed(self, texts: list[str], purpose: str = "embedding") -> list[list[float]]: ...
@@ -85,11 +89,14 @@ class AzureOpenAIProvider:
             )  # fmt: skip
         return cost
 
-    def chat(self, messages, tools=None, purpose="chat") -> ChatResult:
+    def chat(self, messages, tools=None, purpose="chat", response_format=None) -> ChatResult:
+        """response_format: a json_schema format for structured output (the digests use it)."""
         started = time.monotonic()
         kwargs: dict[str, Any] = {"max_completion_tokens": self.max_completion_tokens}
         if tools:
             kwargs["tools"] = tools
+        if response_format:
+            kwargs["response_format"] = response_format
         resp = self.client.chat.completions.create(
             model=self.chat_deployment, messages=messages, **kwargs
         )

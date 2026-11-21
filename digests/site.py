@@ -126,10 +126,15 @@ def slug(d: dict) -> str:
     return f"digests/{d['kind'].replace('_', '-')}-{d['period_key']}.html"
 
 
+def showcase_images(showcase_dir: Path) -> list[Path]:
+    """Recorded GIFs first, then screenshots."""
+    return sorted(showcase_dir.glob("*.gif")) + sorted(showcase_dir.glob("*.png"))
+
+
 def showcase_html(showcase_dir: Path) -> str:
     convo_file = showcase_dir / "conversations.json"
     convos = json.loads(convo_file.read_text(encoding="utf-8")) if convo_file.exists() else []
-    shots = sorted(showcase_dir.glob("*.png"))
+    shots = showcase_images(showcase_dir)
     parts = [
         "<h1>Showcase</h1>",
         '<p class="meta">The chatbot runs locally (it needs a database and an Azure OpenAI '
@@ -192,7 +197,7 @@ def render(
     ).encode()
     files["showcase.html"] = page("Showcase", showcase_html(showcase_dir)).encode()
     files["ops.html"] = page("AI Ops", dashboard.render_body(dashboard.gather(conn, now))).encode()
-    for p in sorted(showcase_dir.glob("*.png")):
+    for p in showcase_images(showcase_dir):
         files[f"showcase/{p.name}"] = p.read_bytes()
     return files
 

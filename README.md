@@ -9,10 +9,10 @@ A chatbot about the current Premier League season (2026-27). Ask it about the ta
 
 The chat app runs on your own computer only. What is public is the **[project website](https://elidehaene01.github.io/premier-league-chatbot/)**:
 - the weekly summaries;
-- a [showcase](https://elidehaene01.github.io/premier-league-chatbot/showcase.html) with screenshots and recorded conversations;
+- a [showcase](https://elidehaene01.github.io/premier-league-chatbot/showcase.html) with a demo recording, screenshots and recorded conversations;
 - the [AI Ops dashboard](https://elidehaene01.github.io/premier-league-chatbot/ops.html) with cost, speed, eval scores and data freshness.
 
-![The chat answering "Who is top of the league?" with the league table](docs/showcase/01-league-table.png)
+![A full chat session with the local app (74 s demo recording)](docs/showcase/10-chat-demo.gif)
 
 | News with sources | Line-ups | "Why" questions |
 |---|---|---|

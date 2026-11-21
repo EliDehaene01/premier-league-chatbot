@@ -1,6 +1,6 @@
 # premier-league-chatbot
 
-A chatbot about the current Premier League season (2026-27). It answers stats questions (table, results, fixtures, players) through tool calls on structured data, and news questions through RAG over articles from the official Premier League site, always citing the article. It runs locally; weekly digests will be published to GitHub Pages.
+A chatbot about the current Premier League season (2026-27). It answers stats questions (table, results, fixtures, players) through tool calls on structured data, and news questions through RAG over articles from the official Premier League site, always citing the article. It runs locally; weekly digests and an AI Ops dashboard are published to GitHub Pages.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how it fits together, [docs/data_sources.md](docs/data_sources.md) for the APIs, and [docs/adr/](docs/adr/) for decisions.
 
@@ -84,6 +84,19 @@ Weekly ingestion (`matchweek`, `news`) now also embeds new articles; `--no-index
 
 Each ingestion mode ends with data-quality checks and exits non-zero if one fails; `--summary out.json` writes a run summary. To schedule the weekly runs on Windows, run `scripts/schedule_windows.ps1` once. Schema: [docs/ingestion_schema.md](docs/ingestion_schema.md).
 
+## AI Ops
+
+```bash
+python scripts/langfuse_env.py                          # once: adds Langfuse secrets to .env
+docker compose -f docker-compose.langfuse.yml up -d     # Langfuse on http://localhost:3000
+python -m backend.observability.freshness               # data freshness checks
+python -m evals.feedback review                         # thumbs-down answers to review (logs/)
+python -m evals.feedback promote 12 --category standings --expected-tool get_league_table
+python -m evals.run --dataset feedback_v1               # the promoted cases
+```
+
+Sign in to Langfuse with `LANGFUSE_INIT_USER_EMAIL` and `LANGFUSE_INIT_USER_PASSWORD` from `.env`. Traces appear once `LANGFUSE_HOST` and the two keys are set; without them nothing is traced. The public dashboard is `ops.html` on the Pages site, refreshed with every publish. The eval gate on pull requests needs the Azure secrets in the repository settings (see `.github/workflows/eval-gate.yml`).
+
 ## Status
 
 | Phase | What | Status |
@@ -93,5 +106,5 @@ Each ingestion mode ends with data-quality checks and exits non-zero if one fail
 | 2 | RAG + tools + chat loop | done |
 | 3 | Evals dataset | done |
 | 4 | API + React UI + structured citations | done |
-| 5 | Weekly digests (GitHub Pages) + own MCP server | in progress |
-| 6 | AI Ops: tracing, CI eval gate, dashboards, feedback | |
+| 5 | Weekly digests (GitHub Pages) + own MCP server | done |
+| 6 | AI Ops: tracing, CI eval gate, dashboards, feedback | in progress |

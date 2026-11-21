@@ -37,6 +37,21 @@ def test_league_table(ctx):
     assert run_tool(ctx, "get_league_table", {"as_of_matchweek": 7})["available_matchweeks"] == [1]
 
 
+def test_league_table_fetched_mid_matchweek_says_so(ctx):
+    # another matchweek 1 game, a day after the played one, still to come: the official table
+    # (stored as matchweek 1) is the table after matchweek 0 plus one game of matchweek 1
+    ctx.conn.execute(
+        "INSERT INTO silver.matches (match_id, season, matchweek, kickoff_utc, home_club_id, "
+        "away_club_id, period) SELECT 1, season, 1, kickoff_utc + interval '1 day', "
+        "away_club_id, home_club_id, 'PreMatch' FROM silver.matches "
+        "WHERE matchweek = 1 AND is_finished LIMIT 1"
+    )
+    out = run_tool(ctx, "get_league_table", {})
+    assert (out["after_matchweek"], out["matchweek_in_progress"]) == (0, 1)
+    assert "1 of the 2 matchweek 1 games" in out["note"]
+    assert out["source_id"] == "t1"
+
+
 def test_fixtures_and_results(ctx):
     (fixture,) = run_tool(ctx, "get_fixtures", {"club": "Gunners"})["fixtures"]
     assert (fixture["home_club"], fixture["away_club"]) == ("Coventry City", "Arsenal")

@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     tool_transport: str = "mcp"
     mcp_url: str = ""  # e.g. http://127.0.0.1:8765/mcp for `python -m mcp_server --http`
 
+    # tracing: self-hosted Langfuse; empty = tracing off (tests, CI, a laptop without it)
+    langfuse_host: str = ""
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    trace_environment: str = "local"  # "eval" for eval runs, so dashboards can tell them apart
+
     database_url: str = ""  # DATABASE_URL wins over the POSTGRES_* parts when set
 
     @property

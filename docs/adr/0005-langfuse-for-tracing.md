@@ -8,7 +8,7 @@ We need traces of each chat turn (prompts, tool calls, retrieval, latency, token
 
 ## Decision
 
-Self-hosted Langfuse, added in Phase 6, running beside Postgres in docker compose.
+Self-hosted Langfuse, added in Phase 6, running beside Postgres in docker compose. How it is used: [ADR 0011](0011-ai-ops.md).
 
 ## Consequences
 

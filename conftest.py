@@ -1,11 +1,15 @@
 import os
 
-import psycopg
-import pytest
-from psycopg.conninfo import make_conninfo
+# tests never send traces, even when .env holds Langfuse keys (env vars beat .env)
+for _key in ("LANGFUSE_HOST", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
+    os.environ[_key] = ""
 
-from backend.config import settings
-from backend.db import init_db
+import psycopg  # noqa: E402
+import pytest  # noqa: E402
+from psycopg.conninfo import make_conninfo  # noqa: E402
+
+from backend.config import settings  # noqa: E402
+from backend.db import init_db  # noqa: E402
 
 TEST_DB = "plc_test"
 

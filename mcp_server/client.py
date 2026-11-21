@@ -10,10 +10,13 @@ server started with `python -m mcp_server --http`.
 import json
 import threading
 from contextlib import ExitStack
+from functools import partial
 from typing import Any
 
 from anyio.from_thread import start_blocking_portal
 from mcp import Client
+
+from backend.observability import tracing
 
 
 class McpTools:
@@ -44,8 +47,11 @@ class McpTools:
         return self._specs
 
     def call(self, name: str, arguments: dict) -> dict:
+        # the caller's trace travels in _meta, so the server's spans join the same trace
+        parent = tracing.traceparent()
+        meta = {"traceparent": parent} if parent else None
         with self._lock:
-            result = self._portal.call(self._client.call_tool, name, arguments)
+            result = self._portal.call(partial(self._client.call_tool, name, arguments, meta=meta))
         if isinstance(result.structured_content, dict):
             return result.structured_content
         text = "".join(c.text for c in result.content if getattr(c, "type", "") == "text")

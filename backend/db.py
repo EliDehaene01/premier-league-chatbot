@@ -216,6 +216,33 @@ CREATE TABLE IF NOT EXISTS public.chat_turns (
     latency_ms      int,
     error           text
 );
+-- data freshness checks after each scheduled ingestion (backend/observability/freshness.py)
+CREATE TABLE IF NOT EXISTS public.freshness_checks (
+    id         bigserial PRIMARY KEY,
+    checked_at timestamptz NOT NULL DEFAULT now(),
+    name       text NOT NULL,
+    status     text NOT NULL CHECK (status IN ('ok', 'warn', 'fail')),
+    detail     text NOT NULL,
+    data       jsonb NOT NULL DEFAULT '{}'
+);
+
+-- one row per eval run (evals/run.py), for the AI Ops dashboard; raw results stay in files
+CREATE TABLE IF NOT EXISTS public.eval_runs (
+    id                bigserial PRIMARY KEY,
+    run_at            timestamptz NOT NULL,
+    dataset           text NOT NULL,
+    subset            text,
+    prompt_version    text,
+    chat_deployment   text,
+    cases             int NOT NULL,
+    pass_rate         numeric(4, 3) NOT NULL,
+    cost_usd          numeric(12, 6),
+    judge_cost_usd    numeric(12, 6),
+    latency_p50_ms    int,
+    latency_p95_ms    int,
+    passed_thresholds boolean NOT NULL,
+    summary           jsonb NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS public.feedback (
     id              bigserial PRIMARY KEY,
@@ -229,6 +256,15 @@ CREATE TABLE IF NOT EXISTS public.feedback (
     prompt_version  text,
     created_at      timestamptz NOT NULL DEFAULT now()
 );
+
+-- Phase 6: the Langfuse trace of the turn, so feedback can be attached to it as a score
+ALTER TABLE public.chat_turns ADD COLUMN IF NOT EXISTS trace_id text;
+-- Phase 6 feedback loop (evals/feedback.py): a thumbs-down is promoted to an eval case or
+-- dismissed, once
+ALTER TABLE public.feedback ADD COLUMN IF NOT EXISTS reviewed_at timestamptz;
+ALTER TABLE public.feedback ADD COLUMN IF NOT EXISTS review_outcome text;
+ALTER TABLE public.feedback ADD COLUMN IF NOT EXISTS review_note text;
+ALTER TABLE public.feedback ADD COLUMN IF NOT EXISTS eval_case_id text;
 
 -- gold: what the chatbot's tools read
 -- weekly digests (matchweek recap, news highlights); a re-run adds a row, the newest one wins

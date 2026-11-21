@@ -110,6 +110,8 @@ def test_rate_limit(client, monkeypatch):
 def test_health_and_suggestions(client):
     h = client.get("/api/health").json()
     assert h["db"] and h["table_after_matchweek"] == 1 and h["indexed_chunks"] == 0
+    assert {c["name"] for c in h["checks"]} >= {"ingestion", "results", "table", "news"}
+    assert h["status"] == "degraded"  # sample data is months old
     s = client.get("/api/suggestions").json()["suggestions"]
     assert s[0] == "Who is top of the league?" and any("Havertz" in q for q in s)
 

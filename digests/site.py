@@ -14,6 +14,8 @@ from pathlib import Path
 import psycopg
 from psycopg.rows import dict_row
 
+from backend.observability import dashboard
+
 BRANCH = "gh-pages"
 KIND_LABEL = {"matchweek_recap": "Matchweek recap", "news_highlights": "News highlights"}
 SHOWCASE_DIR = Path("docs/showcase")  # conversations.json + screenshots, recorded locally
@@ -54,7 +56,7 @@ def page(title: str, body: str, root: str = "") -> str:
 <title>{esc(title)}</title><link rel="stylesheet" href="{root}style.css"></head>
 <body><header class="site"><div><strong>Premier League Chat</strong><nav>
 <a href="{root}index.html">This week</a><a href="{root}archive.html">Archive</a>
-<a href="{root}showcase.html">Showcase</a></nav></div></header>
+<a href="{root}showcase.html">Showcase</a><a href="{root}ops.html">AI Ops</a></nav></div></header>
 <main>{body}</main></body></html>
 """
 
@@ -152,9 +154,12 @@ def showcase_html(showcase_dir: Path) -> str:
     return "".join(parts)
 
 
-def render(conn: psycopg.Connection, showcase_dir: Path = SHOWCASE_DIR) -> dict[str, bytes]:
-    """Every file of the site, as {path: content}. Deterministic for the same data."""
-    files: dict[str, bytes] = {"style.css": CSS.strip().encode(), ".nojekyll": b""}
+def render(
+    conn: psycopg.Connection, showcase_dir: Path = SHOWCASE_DIR, now: datetime | None = None
+) -> dict[str, bytes]:
+    """Every file of the site, as {path: content}. Deterministic for the same data and `now`."""
+    css = CSS.strip() + dashboard.CSS
+    files: dict[str, bytes] = {"style.css": css.encode(), ".nojekyll": b""}
     digests = latest_digests(conn)
     for d in digests:
         files[slug(d)] = page(d["headline"], digest_html(d), "../").encode()
@@ -186,6 +191,7 @@ def render(conn: psycopg.Connection, showcase_dir: Path = SHOWCASE_DIR) -> dict[
         "Archive", f'<h1>Archive</h1><ul class="archive">{items}</ul>'
     ).encode()
     files["showcase.html"] = page("Showcase", showcase_html(showcase_dir)).encode()
+    files["ops.html"] = page("AI Ops", dashboard.render_body(dashboard.gather(conn, now))).encode()
     for p in sorted(showcase_dir.glob("*.png")):
         files[f"showcase/{p.name}"] = p.read_bytes()
     return files

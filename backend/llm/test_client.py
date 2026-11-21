@@ -1,6 +1,8 @@
 import json
 from datetime import UTC, datetime
 
+import pytest
+
 from backend.llm.client import MAX_TOOL_ROUNDS, chat
 from backend.llm.fake_provider import FakeProvider, call
 from backend.llm.providers import ChatResult
@@ -8,14 +10,19 @@ from backend.tools import ToolContext
 
 
 class FakeConn:
-    """Answers the system prompt's matchweek query; tools are monkeypatched in these tests."""
+    """Answers the system prompt's next-matchweek query; tools are monkeypatched in these tests."""
 
     def execute(self, sql, params=None):
         class R:
             def fetchone(self):
-                return (10, 11)
+                return (11,)
 
         return R()
+
+
+@pytest.fixture(autouse=True)
+def completed_matchweek(monkeypatch):
+    monkeypatch.setattr("backend.llm.client.latest_complete_matchweek", lambda conn, now: 10)
 
 
 def ctx(script):

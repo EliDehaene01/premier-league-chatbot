@@ -74,7 +74,7 @@ def test_chat_streams_events_in_order_and_validates_citations(client, db):
     assert message["widgets"][0]["type"] == "table"
     assert dict(ev)["usage"]["cost_usd"] == pytest.approx(0.003)
     stored = db.execute("SELECT question, prompt_version FROM chat_turns").fetchall()
-    assert stored == [("Who is top?", "v3")]
+    assert stored == [("Who is top?", "v4")]
 
 
 def test_feedback_is_stored_with_the_turn(client, db):

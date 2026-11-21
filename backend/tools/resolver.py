@@ -38,7 +38,8 @@ class Resolution:
 
     def error(self, kind: str, name: str) -> dict:
         if self.candidates:
-            return {"error": f"'{name}' is ambiguous; ask which {kind} the user means",
+            return {"error": f"'{name}' is ambiguous; ask which {kind} the user means, or "
+                             "start the answer with 'Assuming you mean <full name>:'",
                     "candidates": self.candidates}  # fmt: skip
         return {"error": f"no Premier League 2026-27 {kind} matches '{name}'"}
 

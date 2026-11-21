@@ -1,4 +1,5 @@
 import os
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -64,6 +65,69 @@ def test_articles_query_params():
     params = route.calls.last.request.url.params
     assert params["page"] == "2" and params["pageSize"] == "5"
     assert params["references"] == "SDP_FOOTBALL_COMPETITION:8"
+
+
+@respx.mock
+def test_on_response_hook_gets_every_raw_response():
+    seen = []
+    respx.get(f"{SDP_API}/v1/matches/5/events").respond(json={"homeTeam": {}})
+    respx.get(CONTENT_API).respond(json={"content": []})
+    c = PLClient(delay=0, on_response=lambda *a: seen.append(a))
+    c.get_match_events(5)
+    c.get_articles()
+    assert seen[0] == ("sdp", "v1/matches/5/events", {}, {"homeTeam": {}})
+    assert seen[1][:2] == ("content", "content/premierleague/text/EN/")
+
+
+@respx.mock
+def test_teams_squad_and_leaderboard_paths():
+    base = f"{SDP_API}/v1/competitions/8/seasons/2026"
+    respx.get(f"{base}/teams").respond(json={"data": [{"id": "3"}], "pagination": {}})
+    respx.get(f"{base}/teams/3/squad").respond(json=[{"id": {"playerId": "1"}}])
+    board = respx.get(f"{base}/players/stats/leaderboard").respond(
+        json={"data": [], "pagination": {"_next": None}}
+    )
+    c = client()
+    assert c.get_teams(2026) == [{"id": "3"}]
+    assert c.get_squad(2026, 3) == [{"id": {"playerId": "1"}}]
+    c.get_leaderboard(2026, "goal_assists")
+    assert board.calls.last.request.url.params["_sort"] == "goal_assists:desc"
+
+
+def _article(id_, date):
+    return {"id": id_, "date": date, "title": "t"}
+
+
+@respx.mock
+def test_articles_since_stops_at_first_page_entirely_older_than_cutoff():
+    pages = [
+        [_article(1, "2026-11-20T10:00:00Z"), _article(2, "2026-11-01T10:00:00Z")],
+        [_article(3, "2026-10-31T10:00:00Z"), _article(4, "2026-11-02T10:00:00Z")],  # unordered
+        [_article(5, "2026-10-30T10:00:00Z")],
+        [_article(6, "2026-11-05T10:00:00Z")],  # never reached
+    ]
+    route = respx.get(CONTENT_API).mock(
+        side_effect=[httpx.Response(200, json={"content": p}) for p in pages]
+    )
+    found = client().get_articles_since(datetime(2026, 11, 1, tzinfo=UTC))
+    assert [a["id"] for a in found] == [1, 2, 4]
+    assert route.call_count == 3
+
+
+@pytest.mark.live
+@pytest.mark.skipif(os.getenv("PLC_LIVE_TESTS") != "1", reason="set PLC_LIVE_TESTS=1")
+def test_live_leaderboard_sort_keys_and_squad():
+    c = PLClient()
+    for sort, stat in (("goal_assists", "goalAssists"), ("clean_sheets", "cleanSheets")):
+        top = c._get(
+            f"{SDP_API}/v1/competitions/8/seasons/2026/players/stats/leaderboard",
+            {"_sort": f"{sort}:desc", "_limit": 5},
+        )["data"]
+        values = [p["stats"].get(stat, 0) for p in top]
+        assert values == sorted(values, reverse=True) and values[0] > 0
+    teams = c.get_teams(2026)
+    assert len(teams) == 20
+    assert c.get_squad(2026, teams[0]["id"])
 
 
 @pytest.mark.live

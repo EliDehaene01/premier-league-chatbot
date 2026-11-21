@@ -54,8 +54,14 @@ Base: `https://sdp-prem-prod.premier-league-prod.pulselive.com/api`
 - robots.txt on www.premierleague.com only blocks tracking query parameters; the API hosts are separate. We stay polite anyway: one client, a project User-Agent, a delay between calls, backoff on 429 and 5xx, and weekly or twice-weekly schedules rather than polling.
 - This is a personal, non-commercial portfolio project that runs locally. We store only what the chatbot needs and always link back to the article's `canonicalUrl`.
 
-## Open follow-ups for Phase 1
+## Phase 1 findings (2026-11-21)
 
-- Confirm the leaderboard sort keys for assists and clean sheets.
-- Check whether `startDate`/`endDate` filters work on the content API (the first test was inconclusive); until then, page backwards until the cut-off date.
-- Decide whether the FPL API is still needed once SDP squads and stats are ingested.
+- **Leaderboard sort keys are snake_case:** `goals`, `goal_assists`, `clean_sheets`, `appearances`. CamelCase keys (`goalAssists`, `cleanSheets`) do not error: they are silently ignored and the default order comes back. The stats fields in the response stay camelCase (`goalAssists`, `cleanSheets`, `timePlayed`, `totalRedCards`). A live test checks that the two sorts really come back in descending order.
+- **Leaderboard stats are sparse:** zero values are left out of `stats`, and each sort returns a different subset of players (222 for `goals`). Ingestion fetches all four sorts with `_limit=100` and merges them per player (472 players on 2026-11-21).
+- **`startDate`/`endDate` do not work on the content API.** `startDate=2026-09-01&endDate=2026-09-07`, the same with full ISO timestamps, and `fromDate`/`toDate` all return the newest articles unchanged. Ingestion pages backwards and stops at the first page whose items are all older than the cut-off. Ordering is newest-first but not strict: older archive items appear among new ones (46 of 780 since 2026-08-01 are from before August, back to 1978).
+- **`canonicalUrl` is always empty** in list results. `https://www.premierleague.com/en/news/{id}/{titleUrlSegment}` resolves (200), so silver builds the URL from that.
+- **Empty bodies:** every `label:Club News` (260) and `label:Match report` (199) item and most `series:transfers` items have no `body`. That is 493 of 780 articles; for them silver keeps title, description and summary.
+- **Standings only return the current table.** `matchweek`, `matchWeek` and `mw` parameters are ignored. History therefore comes from storing one snapshot per weekly run. `deductions` is an empty list this season.
+- **Match kickoffs** are UK local time (`kickoffTimezone` BST or GMT); silver converts them to UTC. `v2/matches` returns all 380 fixtures of the season with `_limit=100` (4 pages).
+- **Squad dates** use the string `Unknown` when a birth date is missing.
+- **FPL API:** not needed for now. SDP squads, stats and fixtures cover the chatbot. Revisit only if FPL-specific questions (prices, ownership) become a feature.

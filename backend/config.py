@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     postgres_password: str = ""
     postgres_db: str = "plc"
     postgres_host: str = "localhost"
-    postgres_port: int = 5432
+    postgres_port: int = 5433
 
     azure_openai_endpoint: str = ""
     azure_openai_api_key: str = ""
@@ -17,9 +17,11 @@ class Settings(BaseSettings):
 
     pl_season: int = 2026
 
+    database_url: str = ""  # DATABASE_URL wins over the POSTGRES_* parts when set
+
     @property
-    def database_url(self) -> str:
-        return (
+    def dsn(self) -> str:
+        return self.database_url or (
             f"postgresql://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )

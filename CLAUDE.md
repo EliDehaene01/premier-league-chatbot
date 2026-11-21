@@ -13,7 +13,7 @@ A local chatbot about the current Premier League season (2026-27, season id 2026
 - **Every news answer cites title, date and URL** of the article(s) used.
 - **No betting advice. Decline off-topic questions.**
 - **Ingestion is polite:** one client (`ingestion/pl_client.py`), project User-Agent, delay between calls, backoff on 429/5xx.
-- **Bronze is append-only.** Only `backend/db.py` owns the schema DDL.
+- **Bronze is append-only.** Only `backend/db.py` owns the schema DDL. Silver is built only from bronze (`ingestion/silver.py`), never from a live response.
 - **Changes to `llm`, `rag`, `prompts`, `evals` or `mcp_server` must run the eval suite.** Never lower thresholds to get green.
 - **Digests are generated from stored data only**, with citations and fixed, config-driven ranking weights.
 - **Secrets only in `.env`.** Never in code, compose files or commits.
@@ -44,12 +44,13 @@ docs/         # data_sources.md, adr/
 - Database: `docker compose up -d`
 - Install: `pip install -e ".[dev]"`
 - Lint: `ruff check .`
-- Tests: `pytest -m "not live"`; live: `PLC_LIVE_TESTS=1 pytest -m live`
+- Tests: `pytest -m "not live"` (includes `db` tests, which use a throwaway `plc_test` database on the compose Postgres); live: `PLC_LIVE_TESTS=1 pytest -m live`
+- Ingestion: `python -m ingestion backfill|matchweek|news|rebuild` (see README)
 
 ## Current phase
 
 - [x] 0 Setup and source spike
-- [ ] 1 Ingestion: bronze / silver / gold
+- [x] 1 Ingestion: bronze / silver / gold
 - [ ] 2 RAG + tools + chat loop
 - [ ] 3 Evals dataset
 - [ ] 4 API + React UI

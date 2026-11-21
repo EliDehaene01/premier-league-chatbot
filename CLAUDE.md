@@ -52,7 +52,7 @@ docs/         # data_sources.md, adr/
 - MCP server: `python -m mcp_server` (stdio) or `--http`; the chat uses it in-process unless `TOOL_TRANSPORT=direct`
 - Tools are defined once in `backend/tools`; the MCP server serves those schemas unchanged. Add a tool there, never only in `mcp_server`.
 - AI Ops: Langfuse `docker compose -f docker-compose.langfuse.yml up -d` (secrets via `python scripts/langfuse_env.py`); freshness `python -m backend.observability.freshness`; feedback loop `python -m evals.feedback review|promote|dismiss`. Tracing goes through `backend/observability/tracing.py` only, and must never break an answer. Tests blank the `LANGFUSE_*` settings.
-- Evals: `python -m evals.run --dataset chat_v1` (full, about $0.90) or `--subset smoke`; needs `pip install -e .[eval]`. Never lower `evals/thresholds.yaml` to get green. Every eval run costs Azure credit: run one only when asked; the GitHub eval gate starts by hand only.
+- Evals: `python -m evals.run --dataset chat_v1` (full, about $0.90) or `--subset smoke`; needs `pip install -e .[eval]`. Never lower `evals/thresholds.yaml` to get green. Every eval run costs Azure credit: run one only when asked; the GitHub eval gate runs on non-draft PRs that touch the answer path, so keep such PRs as drafts while iterating.
 
 ## Current phase
 
@@ -62,5 +62,5 @@ docs/         # data_sources.md, adr/
 - [x] 3 Evals dataset (chat_v1, evaluators, runner, thresholds)
 - [x] 4 API + React UI + structured citations
 - [x] 5 Weekly digests + own MCP server. Mon 23:30 UTC ingest, Tue 05:00 UTC matchweek recap; Thu 23:00 UTC ingest, Fri 05:00 UTC news highlights; summaries published to GitHub Pages
-- [x] 6 AI Ops: Langfuse tracing, eval gate (manual, about $0.90 a run), cost and latency dashboard on Pages, feedback loop
+- [x] 6 AI Ops: Langfuse tracing, eval gate (non-draft answer-path PRs, about $0.90 a run), cost and latency dashboard on Pages, feedback loop
 - [x] 7 Clean-up: README getting-started guide for non-programmers, decisions table and MCP explainer in ARCHITECTURE.md, secret scan

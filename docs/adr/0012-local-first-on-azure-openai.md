@@ -22,4 +22,4 @@ The chatbot needs a database, a backend, a UI, a language model and an embedding
 - Running costs are only the model calls: under a cent per chat answer, about $0.90 for a full eval run. These show on the AI Ops page.
 - Anyone who wants to run it needs Docker and their own Azure keys. The README walks through both.
 - The scheduled jobs need the laptop to be on (Task Scheduler catches up missed runs).
-- The eval gate on GitHub uses repository secrets. It starts only when the owner runs it by hand, so neither outsiders nor repeated pushes can spend the budget.
+- The eval gate on GitHub uses repository secrets. GitHub never passes them to forks, and the gate skips draft pull requests, so outsiders can't spend the budget and work in progress doesn't either.

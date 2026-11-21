@@ -28,7 +28,7 @@ Every choice that shapes the project, with where it is argued in full. ADRs live
 | Own MCP server serving the exact chat tool schemas | one tool layer for the app, Claude and VS Code | [ADR 0004](docs/adr/0004-own-mcp-server.md) |
 | The chat itself is an MCP client (in-process by default) | the evals measure what other MCP clients get too | [ADR 0010](docs/adr/0010-chat-as-mcp-client.md) |
 | Self-hosted Langfuse for traces; only totals published | traces hold questions and answers, which stay local | [ADR 0005](docs/adr/0005-langfuse-for-tracing.md), [ADR 0011](docs/adr/0011-ai-ops.md) |
-| Eval gate on GitHub runs the full set, started by hand only | the smoke subset was too small; every run costs about $0.90 | [ADR 0011](docs/adr/0011-ai-ops.md) |
+| Eval gate on GitHub runs the full set on answer-path pull requests, not on drafts | the smoke subset was too small; every run costs about $0.90, so drafts and test-only changes skip it | [ADR 0011](docs/adr/0011-ai-ops.md) |
 | No betting advice; off-topic questions declined | scope and responsibility | [Chat loop](#chat-loop) |
 | Secrets only in `.env`, never in code, compose files or commits | the repository is public | [README](README.md#step-4-fill-in-your-settings) |
 
@@ -422,7 +422,7 @@ It's rebuilt every time the website is published.
 
 So a problem a user finds once becomes a test that keeps it fixed.
 
-**5. The eval gate: a test run before changes go in.** Before a change to how the chatbot answers is merged, the owner can run the full 165-question eval on GitHub. It starts by hand only, because each run costs about $0.90. A change that makes answers worse shows up as scores below the minimums.
+**5. The eval gate: a test run before changes go in.** Before a change to how the chatbot answers is merged, GitHub runs the full 165-question eval on the pull request. Each run costs about $0.90, so it skips draft pull requests and changes that only touch tests or docs; marking a draft "ready for review" runs it once. A change that makes answers worse shows up as scores below the minimums.
 
 ### Details
 
@@ -443,7 +443,7 @@ So a problem a user finds once becomes a test that keeps it fixed.
 - **Freshness** (`backend/observability/freshness.py`): ingestion age, results missing after a fetch, a table that misses finished matches, newest article, unindexed articles, missing digests. Shown in `/api/health` and the header badge; stored after each scheduled ingestion.
 - **Dashboard** (`backend/observability/dashboard.py`): `ops.html` on the Pages site, rendered with every publish: spend per day and per area (chat, evals, digests, MCP clients, index), answer time, thumbs-up rate, eval runs (`eval_runs`, written by `evals/run.py`), freshness. Totals only.
 - **Feedback loop** (`evals/feedback.py`): `review` writes unreviewed thumbs-downs with tools, comment and trace link to `logs/`; `promote` turns one into a case in `feedback_v1.jsonl`; `dismiss` closes it.
-- **Eval gate** (`.github/workflows/eval-gate.yml`): started by hand (Actions > Eval gate > Run workflow) for a branch that changes llm, rag, prompts, tools, evals, digests or the MCP server, it ingests the season into a throwaway Postgres, builds the index and runs the full chat_v1 set (about $0.90 per run, so it never starts on its own) against `evals/thresholds.yaml`; the 25-case smoke subset was too small for those minimums (1 to 4 cases per evaluator). Skips with a warning when the Azure secrets are not set.
+- **Eval gate** (`.github/workflows/eval-gate.yml`): runs on non-draft pull requests that change llm, rag, prompts, tools, the chat loop, evals or the MCP server (test files excluded), or by hand (Actions > Eval gate > Run workflow). It ingests the season into a throwaway Postgres, builds the index and runs the full chat_v1 set (about $0.90 per run; a new push cancels the previous run) against `evals/thresholds.yaml`; the 25-case smoke subset was too small for those minimums (1 to 4 cases per evaluator). Skips with a warning when the Azure secrets are not set.
 
 ## Frontend
 

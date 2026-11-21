@@ -197,3 +197,45 @@ def test_publish_writes_an_orphan_gh_pages_branch_then_updates_it(tmp_path):
     assert site.publish({"index.html": b"v1"}, repo, push=True)["changed"] is False
     site.publish({"index.html": b"v2", "digests/a.html": b"a"}, repo, push=True)
     assert git("show", "gh-pages:index.html", cwd=remote).stdout == "v2"
+
+
+def test_zone_claims_must_match_the_computed_table():
+    from digests.writer import zone_claim_error
+
+    def row(club, now, before):
+        return {"club": club, "position": now, "previous_position": before}
+
+    table = {
+        "rows": [
+            row("Liverpool", 4, 5),
+            row("Chelsea", 5, 4),
+            row("Nottingham Forest", 16, 19),
+            row("Manchester United", 18, 17),
+            row("Sunderland", 19, 20),
+            row("Crystal Palace", 20, 18),
+        ],
+        "entered_top4": ["Liverpool"],
+        "left_top4": ["Chelsea"],
+        "entered_bottom3": ["Manchester United"],
+        "left_bottom3": ["Nottingham Forest"],
+    }
+    aliases = {
+        "Manchester United": ["Manchester United", "Man Utd"],
+        "Crystal Palace": ["Crystal Palace", "Palace"],
+        "Nottingham Forest": ["Nottingham Forest", "Forest"],
+    }
+    ok = [
+        "Liverpool crack the top four",
+        "Chelsea dropped out of the top four after losing at Sunderland.",
+        "Man Utd entered the bottom three after drawing 4-4 with Aston Villa.",
+        "Forest climbed three places and out of the bottom three.",
+        "Palace dropped to the bottom after a 3-1 defeat to Liverpool.",
+        "Arsenal stayed top.",
+    ]
+    wrong = [  # from the first real matchweek 10 recap
+        "Sunderland left the bottom three with their 1-0 victory over Chelsea.",
+        "Crystal Palace stayed bottom after their 3-1 defeat to Liverpool.",
+        "Chelsea moved into the top four.",
+    ]
+    assert [zone_claim_error(t, table, aliases) for t in ok] == [None] * len(ok)
+    assert all(zone_claim_error(t, table, aliases) for t in wrong)

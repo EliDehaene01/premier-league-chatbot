@@ -20,6 +20,7 @@ import psycopg
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
@@ -230,6 +231,16 @@ def create_app(
         return {"status": "degraded" if stale else "ok", "db": True,
                 "latest_article": article, "latest_finished_match": match,
                 "table_after_matchweek": matchweek, "indexed_chunks": chunks}  # fmt: skip
+
+    @app.get("/api/digests/latest")
+    def latest_digests() -> dict:
+        """The newest matchweek recap and news highlights, for the "This week" page."""
+        with connect() as conn, conn.cursor(row_factory=dict_row) as cur:
+            rows = cur.execute(
+                "SELECT DISTINCT ON (kind) id, kind, period_key, created_at, headline, content, "
+                "sources, facts->'table' AS table FROM digests ORDER BY kind, created_at DESC"
+            ).fetchall()
+        return {r["kind"]: r for r in rows}
 
     @app.get("/api/suggestions")
     def get_suggestions() -> dict:

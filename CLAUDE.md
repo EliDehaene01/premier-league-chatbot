@@ -14,7 +14,7 @@ A local chatbot about the current Premier League season (2026-27, season id 2026
 - **No betting advice. Decline off-topic questions.**
 - **Ingestion is polite:** one client (`ingestion/pl_client.py`), project User-Agent, delay between calls, backoff on 429/5xx.
 - **Bronze is append-only.** Only `backend/db.py` owns the schema DDL. Silver is built only from bronze (`ingestion/silver.py`), never from a live response.
-- **Changes to `llm`, `rag`, `prompts`, `evals` or `mcp_server` must run the eval suite.** Never lower thresholds to get green.
+- **Changes to `llm`, `rag`, `prompts`, `evals`, `digests` or `mcp_server` must run the eval suite** (digests: `python -m evals.digests`). Never lower thresholds to get green.
 - **Digests are generated from stored data only**, with citations and fixed, config-driven ranking weights.
 - **Secrets only in `.env`.** Never in code, compose files or commits.
 
@@ -48,6 +48,7 @@ docs/         # data_sources.md, adr/
 - Ingestion: `python -m ingestion backfill|matchweek|news|rebuild` (see README)
 - RAG index: `python -m backend.rag.build_index` (after ingestion); chat: `python -m backend.chat`
 - Retrieval smoke check: `python -m evals.retrieval_smoke`
+- Digests: `python -m digests recap|news|publish` (see README); digest evals: `python -m evals.digests`
 - Evals: `python -m evals.run --dataset chat_v1` (full, about $1) or `--subset smoke`; needs `pip install -e .[eval]`. Never lower `evals/thresholds.yaml` to get green.
 
 ## Current phase

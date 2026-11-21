@@ -139,12 +139,31 @@ Names go through one resolver (`backend/tools/resolver.py`). It tries exact name
 
 ## Weekly digests
 
-Generated from stored data only, with citations and fixed config-driven ranking weights, published to GitHub Pages:
+Two summaries a week, written from stored data only (`digests/`), shown on the app's "This week" page and published to GitHub Pages:
 
-- Monday 23:30 UTC ingest, Tuesday 05:00 UTC matchweek recap.
-- Thursday 23:00 UTC ingest, Friday 05:00 UTC news highlights.
+| | Matchweek recap | News highlights |
+|---|---|---|
+| Ingestion | Monday 23:30 UTC | Thursday 23:00 UTC |
+| Digest | Tuesday 05:00 UTC | Friday 05:00 UTC |
+| Command | `python -m digests recap --publish` | `python -m digests news --publish` |
+| Facts gathered by code | results with scorers, catch-up games, pending fixtures, the table after the matchweek with each club's move, top-4 and bottom-3 changes, clean sheets, hat-tricks, comebacks, top scorers | the week's articles (fantasy left out), grouped into stories and ranked |
+| Model calls | one, structured output | one label call, one per story, one for headline and intro |
 
-*Details: Phase 5.*
+**Facts first, then prose** (FormulaOne's `summary.py` pattern). `digests/recap.py` and `digests/news.py` gather everything with SQL; each fact carries the `source_id` the chat uses (`m`, `t`, `s`, `a`). The model gets the facts as JSON and returns structured output (`json_schema`, strict) of `{headline, intro, sections: [{title, bullets: [{text, sources}]}]}`. Prompts are versioned files (`backend/prompts/digest_*_v1.md`) and the version is stored on each digest.
+
+**Validation** (`digests/writer.py`): a line survives only if its sources are known facts, every number in it appears in those sources, and any score in it is its cited match's score. Anything else is dropped and recorded in `digests.checks`. If the recap loses lines, it is written once more and the draft with fewer drops wins; a headline with an unknown number is replaced by a plain one. The "All results" section and the table are written by code, never by the model, so a fixture can never be missing or misreported.
+
+**Matchweek choice and moves.** The recap covers the newest matchweek whose fixtures are all played; a fixture more than four days after the rest counts as postponed and is listed as still to be played, and it appears as a catch-up in the recap after it is played. Table moves are computed from results (the table before the matchweek's first kickoff against the table after its last), because the API only serves the current table. When a standings snapshot exists for that matchweek, positions are cross-checked against it.
+
+**News ranking.** Articles are grouped greedily by cosine similarity of their mean chunk embedding (threshold 0.80). One model call labels each story's type from titles and descriptions; code then scores it with fixed weights from `digests/weights.yaml`: `coverage x ln(1 + articles) + type weight + recency x 0.5^(age / 3 days)`, and the top 7 are summarised. The same week always ranks the same way, and changing the ranking is a reviewed config change. All article text passes Prompt Shields before any model call; if the service is down, no digest is written.
+
+**Storage and API.** `public.digests` keeps every run (a re-run adds a row; the newest wins), with the facts, sources, checks, prompt version and cost. `GET /api/digests/latest` serves the newest of each kind to the app.
+
+**GitHub Pages** ([ADR 0009](docs/adr/0009-digests-on-github-pages.md)). `digests/site.py` renders a small static site (index, one page per digest, archive, and a showcase page with screenshots and recorded conversations from `docs/showcase/`) and commits it to the `gh-pages` branch through a separate git worktree (`.site/`), so publishing never touches the branch that is checked out. Pages serves that branch as is. The scheduled runs on the laptop push it with the laptop's git credentials.
+
+**Evals** (`python -m evals.digests`, dataset `evals/datasets/digests_v1.jsonl`, pinned to past weeks): code checks for citations, scores, fixture coverage, hand-labelled stories, format and the share of lines that survived validation, plus one judge call per digest for faithfulness. Thresholds in `evals/digest_thresholds.yaml` are report-only until the first measured run.
+
+Known limit: the number check accepts any number found in a line's sources, so a line citing the whole table can state a points gap that happens to equal some other value in the table. The faithfulness judge is there for that.
 
 ## MCP server
 

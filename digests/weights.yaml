@@ -1,0 +1,29 @@
+# Fixed, config-driven settings for the digests (CLAUDE.md: never in a prompt).
+# Changing a weight changes which stories make the news digest, so record why in the commit.
+
+recap:
+  pending_after_days: 4       # a fixture this long after its matchweek's games is postponed
+  top_scorers: 5
+
+news:
+  window_days: 7              # Friday 05:00 UTC back to the previous Friday
+  include_fantasy: false      # FPL content is its own world; leave it out of the highlights
+  cluster_similarity: 0.80    # cosine similarity for two articles to be the same story
+  stories: 7                  # how many stories the digest covers (plan: 6 to 8)
+  max_articles_per_story: 4   # sent to the model per story, newest first
+  recency_half_life_days: 3
+  score:                      # importance = coverage + type + recency
+    coverage: 1.0             # x ln(1 + number of articles in the story)
+    recency: 1.0              # x 0.5 ** (age in days / half life)
+    type:                     # added by story type; the model labels the type, code scores it
+      title_race: 1.6
+      relegation_race: 1.4
+      manager_change: 1.5
+      injury_key_player: 1.2
+      suspension: 0.9
+      transfer: 0.8
+      record: 1.0
+      award: 0.7
+      match_preview: 0.5
+      match_reaction: 0.9
+      other: 0.3

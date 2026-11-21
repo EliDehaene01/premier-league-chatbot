@@ -1,5 +1,5 @@
 import { readSse, type SseEvent } from "./sse"
-import type { Health, Role } from "./types"
+import type { Digest, Health, Role } from "./types"
 
 export async function streamChat(
   conversationId: string,
@@ -45,4 +45,10 @@ export async function getSuggestions(): Promise<string[]> {
   const res = await fetch("/api/suggestions")
   if (!res.ok) return []
   return (await res.json()).suggestions ?? []
+}
+
+export async function getLatestDigests(): Promise<Partial<Record<Digest["kind"], Digest>>> {
+  const res = await fetch("/api/digests/latest")
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
 }

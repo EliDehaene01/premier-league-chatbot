@@ -33,6 +33,6 @@ def db(db_url):
             "TRUNCATE bronze.api_responses, silver.clubs, silver.players, silver.matches, "
             "silver.match_events, silver.standings_snapshots, silver.player_season_stats, "
             "silver.match_lineups, silver.match_lineup_players, silver.articles, "
-            "silver.article_chunks, llm_calls, feedback, chat_turns RESTART IDENTITY"
+            "silver.article_chunks, llm_calls, feedback, chat_turns, digests RESTART IDENTITY"
         )
         yield conn

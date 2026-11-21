@@ -155,7 +155,11 @@ def get_results(
         f"ORDER BY kickoff_utc {'ASC' if oldest_first else 'DESC'} LIMIT %s",
         (matchweek, matchweek, club_id, club_id, min(limit, 50)),
     )
-    return {"results": [_match(r) for r in rows]}
+    out: dict = {"results": [_match(r) for r in rows]}
+    if matchweek is not None:  # summed here: the model miscounted matchweek goal totals
+        out["total_goals"] = sum(r["home_score"] + r["away_score"] for r in rows)
+        out["matches_counted"] = len(rows)
+    return out
 
 
 def _find_match(ctx, club_a, club_b=None, date=None) -> tuple[int | None, dict | None]:
@@ -339,13 +343,15 @@ def get_club_info(ctx, club: str) -> dict:
     form = _rows(ctx, "SELECT form, points FROM gold.club_form_last5 WHERE club_id = %s",
                  (club_id,))  # fmt: skip
     squad = _rows(ctx, "SELECT count(*) AS n FROM silver.players WHERE club_id = %s", (club_id,))
+    fixtures = get_fixtures(ctx, club=info["name"], limit=10)["fixtures"]
     return {
         **info,
         "source_id": f"c{club_id}",
         "table": standing[0] if standing else None,
         "form_last5_oldest_first": form[0] if form else None,
         "squad_size": squad[0]["n"],
-        "next_fixture": (get_fixtures(ctx, club=info["name"], limit=1)["fixtures"] or [None])[0],
+        "next_fixture": fixtures[0] if fixtures else None,
+        "next_home_fixture": next((f for f in fixtures if f["home_club"] == info["name"]), None),
         "last_result": (get_results(ctx, club=info["name"], limit=1)["results"] or [None])[0],
     }
 
@@ -392,7 +398,10 @@ def get_weekly_digest(ctx, kind: str = "matchweek_recap") -> dict:
     rows = _rows(ctx, "SELECT headline, period_key, created_at, content FROM digests "
                       "WHERE kind = %s ORDER BY created_at DESC LIMIT 1", (kind,))  # fmt: skip
     if not rows:
-        return {"error": f"no {kind.replace('_', ' ')} has been written yet"}
+        return {
+            "error": f"no {kind.replace('_', ' ')} has been written yet",
+            "instead": "answer from get_results (results) or search_news (news)",
+        }
     d = rows[0]
     lines = []
     for section in [{"title": "", "bullets": [d["content"]["intro"]]}] + d["content"]["sections"]:
@@ -432,7 +441,8 @@ TOOLS: dict[str, tuple[Any, dict]] = {
     "get_match_details": (get_match_details, _schema(
         "get_match_details",
         "One match: score, scorers and assists, cards, substitutions. Give match_id, or two "
-        "clubs (and a date when they meet twice; without one the latest played meeting).",
+        "clubs (and a date when they meet twice; without one the latest played meeting). "
+        "For who started, who came off the bench or who was captain, use get_match_lineup.",
         {"match_id": {"type": "integer"}, "club_a": CLUB, "club_b": CLUB, "date": DATE})),
     "get_match_lineup": (get_match_lineup, _schema(
         "get_match_lineup",
@@ -442,7 +452,10 @@ TOOLS: dict[str, tuple[Any, dict]] = {
         "played match). Upcoming matches only have line-ups about an hour before kick-off.",
         {"match_id": {"type": "integer"}, "club": CLUB, "opponent": CLUB, "date": DATE})),
     "get_top_scorers": (get_top_scorers, _schema(
-        "get_top_scorers", "Season leaderboard for goals, assists or clean sheets.",
+        "get_top_scorers",
+        "Season leaderboard for goals, assists or clean sheets from the stats data. For an "
+        "award race as the Premier League reports it (Golden Boot, Golden Glove, Playmaker) "
+        "or the story behind a goal or assist, use search_news.",
         {"stat": {"type": "string", "enum": list(STATS)}, "limit": LIMIT})),
     "get_player_stats": (get_player_stats, _schema(
         "get_player_stats", "A player's season stats and profile. Fuzzy name match.",

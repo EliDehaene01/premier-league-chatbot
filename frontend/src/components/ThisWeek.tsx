@@ -7,7 +7,7 @@ import type { Digest, DigestItem } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { WidgetCard } from "./widgets/WidgetCard"
 
-const LABEL = { matchweek_recap: "Matchweek recap · Tuesday", news_highlights: "News highlights · Friday" }
+const LABEL = { matchweek_recap: "Matchweek recap", news_highlights: "News highlights" }
 
 function Cited({ item, id }: { item: DigestItem; id: string }) {
   return (

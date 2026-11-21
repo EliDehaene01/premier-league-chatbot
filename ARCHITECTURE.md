@@ -122,6 +122,25 @@ Numbers must be exact and current, so they come from SQL-backed tools; articles 
 
 ## RAG pipeline
 
+RAG (retrieval-augmented generation) means: before the model answers a news question, we search our own article collection and hand it the most relevant passages to answer from. The model reads them like a briefing, rather than answering from memory.
+
+### In plain words
+
+**Preparing the articles (once, and after each data load).**
+1. **Cut into passages.** Every article is cut into passages ("chunks") of about 300 words. Neighbouring passages overlap a little, so a sentence on the boundary isn't lost. Each passage starts with its article's title and date.
+2. **Turn each passage into numbers.** An embedding model turns each passage into a list of 1,536 numbers, its "embedding". Passages that mean similar things get similar lists, even when they use different words. "Arsenal's keeper kept another clean sheet" lands close to "Raya didn't concede".
+3. **Store both forms.** The database keeps each passage twice: as numbers, for meaning-based search, and as a word index, like the index at the back of a book, for exact-word search.
+
+**Answering a question.**
+1. **Search by meaning (the "vector top 20").** The question is turned into numbers the same way. The database finds the 20 passages whose numbers are closest to it. This finds passages that *mean* the same thing, even with different wording.
+2. **Search by exact words (the "full-text top 20").** In parallel, a classic keyword search finds the 20 passages that best contain the question's words. This catches what meaning-search blurs: player names, "matchweek 8", "Golden Glove".
+3. **Merge the two lists (reciprocal rank fusion, RRF).** The two searches score in different ways, so their scores can't be compared directly. RRF looks only at *positions*: each passage gets points for how high it ranks in each list (1st place earns the most, 20th place much less), and the points are added up. A passage that ranks well in *both* lists ends on top. That's usually the best sign that it's relevant.
+4. **Prefer recent news.** The merged score is multiplied by a freshness factor. Today's article keeps its full score, a two-week-old one keeps 75%, and an old one never drops below half. Recent news wins a close call, but a clearly better older article still shows up.
+5. **Safety check.** The best 5 passages go through Azure's Prompt Shields, which looks for hidden instructions planted in the text ("ignore your rules and..."). Flagged passages are thrown away. If the check itself is down, *all* passages are thrown away and the bot says news is unavailable.
+6. **Answer with sources.** The model gets the remaining passages with their article ids, answers from them and cites each one. Code turns those ids into the title, date and link you see (see [Citations](#citations)).
+
+### Details
+
 ```
 silver.articles --chunk--> silver.article_chunks (text, vector(1536), tsvector)
 query --> embed --> vector top 20 --\
@@ -172,7 +191,46 @@ The official table is stored under the matchweek that was active when it was fet
 
 ## Weekly digests
 
-Two summaries a week, written from stored data only (`digests/`), shown on the app's "This week" page and published to GitHub Pages:
+Two summaries a week, written from stored data only (`digests/`), shown on the app's "This week" page and published to GitHub Pages.
+
+### How a summary is built, in plain words
+
+The key idea: **code gathers the facts, the model only writes the sentences, and code checks every sentence before it is published.** The model never looks anything up itself, so it can't bring in a score from memory.
+
+**The matchweek recap (Tuesday morning):**
+1. **Pick the matchweek.** Code picks the newest matchweek whose games have all been played. A game postponed by more than four days doesn't hold it up; it's listed as still to play.
+2. **Gather the facts with database queries:**
+   - every result, with scorers;
+   - the table before and after the matchweek, and who moved up or down;
+   - who entered or left the top four and the bottom three;
+   - clean sheets, hat-tricks, comebacks and the top scorers.
+
+   Each fact gets an id, like the chat's sources.
+3. **Write.** The model gets this list of facts and must return a fixed structure: a headline, an intro, and sections of bullet points. Every bullet lists the fact ids it is based on.
+4. **Check every line.** Code drops any line that:
+   - cites a fact that doesn't exist;
+   - contains a number that isn't in its cited facts;
+   - gives a score that differs from the real one;
+   - claims a table move ("left the bottom three") that the computed table contradicts.
+
+   If lines were dropped, the model gets one more try, and the version with fewer problems wins.
+5. **Add the parts code can write itself.** The full results list and the table are added by code, never by the model, so they can't be wrong or incomplete.
+6. **Store and publish.** The recap is saved in the database, with its facts, checks and cost. The app's "This week" page shows it, and the website is rebuilt and pushed.
+
+**The news highlights (Friday morning):**
+1. **Collect the week's articles** (fantasy-football tips left out).
+2. **Group them into stories.** Articles about the same thing have similar embeddings (see [RAG](#rag-pipeline)), so they're grouped automatically: five articles about one injury become one story.
+3. **Rank the stories with a fixed formula:**
+   - how many articles cover the story;
+   - what kind of story it is (a model labels each one: result, injury, transfer, award and so on, each with a set weight);
+   - how recent it is.
+
+   The weights are in a config file, so the same week always gives the same ranking, and changing it is a deliberate, reviewed change. The top 7 go through.
+4. **Safety check, then write.** The article text passes Prompt Shields. Then the model writes one short summary per story, plus a headline and intro, each line citing its articles.
+5. **Check, store and publish** as for the recap.
+
+### Details
+
 
 | | Matchweek recap | News highlights |
 |---|---|---|
@@ -282,7 +340,18 @@ The answer text and the `sources` list travel together, so the UI can link each 
 
 ## API
 
-FastAPI, `backend/api/main.py`, run with `uvicorn backend.api.main:create_app --factory --port 8000`. Local only; CORS allows the Vite dev origin, and the dev server proxies `/api` so the browser stays same-origin.
+**Why there is an API.** The chat logic is Python: the tools, the database, the model calls and the safety checks. The chat screen is a web page in your browser. The API is the bridge between them: the web page sends your question to it, and it runs the chat in Python and sends the answer back. This keeps the Azure keys and the database on the Python side; the browser never sees them. It also lets other front ends use the same chat later without rebuilding the logic.
+
+**What uses it:**
+- The chat screen sends questions to `/api/chat`. It gets back the answer as it's being written, word by word, plus the tool steps ("Fetching the line-ups") and the sources.
+- The thumbs up and down buttons send ratings to `/api/feedback`.
+- The freshness badge reads `/api/health`.
+- The empty chat shows starter questions from `/api/suggestions`.
+- The "This week" page reads `/api/digests/latest`.
+
+It runs on your computer only (`localhost`), so nobody else can reach it.
+
+**Technical details.** FastAPI, `backend/api/main.py`, run with `uvicorn backend.api.main:create_app --factory --port 8000`. Local only; CORS allows the Vite dev origin, and the dev server proxies `/api` so the browser stays same-origin.
 
 | Endpoint | What |
 |---|---|
@@ -299,7 +368,53 @@ Every turn is stored in `chat_turns` (question, answer, tools, sources, prompt v
 
 ## AI Ops
 
-[ADR 0011](docs/adr/0011-ai-ops.md). Five parts, each usable without the others:
+"AI Ops" is everything that keeps an AI app honest once it's running: what it costs, how fast it is, whether its answers are still good, and whether its data is up to date. [ADR 0011](docs/adr/0011-ai-ops.md). There are five parts, and each works without the others.
+
+### In plain words
+
+**1. Tracing: a flight recorder for every answer.** Each chat answer is recorded step by step in Langfuse, a tracing tool that runs on your own computer:
+- what was asked;
+- which tools the model called, with what arguments and what they returned;
+- which articles the search found;
+- what the safety check said;
+- how many tokens each model call used, what it cost, and how long each step took.
+
+When an answer is wrong, you open its trace and see exactly where it went wrong: the wrong tool, a bad search result, or the model misreading a correct result. Questions and answers stay local; nothing of this is published.
+
+**2. Freshness checks: is the data up to date?** Six checks:
+- when the data was last loaded;
+- whether every finished match has a result;
+- whether the table includes every finished match;
+- how old the newest article is;
+- whether new articles are in the search index;
+- whether this week's summaries exist.
+
+Each gives OK, warning or failing. They feed the coloured badge at the top of the app, run after every scheduled data load, and are stored so the dashboard can show them.
+
+**3. The dashboard: the public summary.** `ops.html` on the website shows totals only, never any question or answer:
+- what the model calls cost per day, and for what (chat, evals, summaries);
+- how fast answers are;
+- the share of thumbs-up;
+- the latest eval scores;
+- the freshness checks.
+
+It's rebuilt every time the website is published.
+
+**4. The feedback loop: thumbs-down answers become tests.** Step by step:
+1. You click thumbs up or down under an answer, optionally with a comment.
+2. The app sends that to the API, which stores it in the `feedback` table in the database. The question, the answer, the tools used and the prompt version are copied next to it, so the rating still makes sense later. If tracing is on, the rating is also attached to that answer's trace.
+3. Every so often, `python -m evals.feedback review` collects all thumbs-down answers nobody has looked at yet into one file (`logs/feedback_review.md`). The file has each question, answer, comment and a link to its trace.
+4. For each one you decide:
+   - **promote** turns the question into a new test case in `evals/datasets/feedback_v1.jsonl`, so the evals check that it's answered correctly from then on;
+   - **dismiss** closes it with a reason, for example "the question was about last season".
+
+   Either way it's marked as reviewed and doesn't come up again.
+
+So a problem a user finds once becomes a test that keeps it fixed.
+
+**5. The eval gate: a test run before changes go in.** Before a change to how the chatbot answers is merged, the owner can run the full 165-question eval on GitHub. It starts by hand only, because each run costs about $0.90. A change that makes answers worse shows up as scores below the minimums.
+
+### Details
 
 - **Tracing** (`backend/observability/tracing.py`, self-hosted Langfuse v4 in `docker-compose.langfuse.yml`). One trace per chat turn, with the conversation as its session:
 

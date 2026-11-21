@@ -37,7 +37,7 @@ def test_tool_call_then_answer(monkeypatch):
     assert turn.answer == "Arsenal are top."
     assert seen == [("get_league_table", {"as_of_matchweek": 10})]
     assert turn.tool_calls == [{"name": "get_league_table", "arguments": '{"as_of_matchweek": 10}'}]
-    assert abs(turn.cost_usd - 0.003) < 1e-9 and turn.prompt_version == "v2"
+    assert abs(turn.cost_usd - 0.003) < 1e-9 and turn.prompt_version == "v3"
     roles = [m["role"] for m in turn.messages]
     assert roles == ["user", "assistant", "tool", "assistant"]
     # stateless: the second call got the system prompt plus the whole conversation so far
@@ -74,15 +74,11 @@ def test_unknown_cost_stays_unknown():
     assert chat([{"role": "user", "content": "hi"}], c).cost_usd is None
 
 
-def test_sources_are_only_the_cited_articles(monkeypatch):
-    def fake_tool(c, name, args):
-        c.sources += [
-            {"article_id": 1, "title": "A", "date": "2026-11-20", "url": "u/1"},
-            {"article_id": 2, "title": "B", "date": "2026-11-19", "url": "u/2"},
-        ]
-        return {"results": []}
-
-    monkeypatch.setattr("backend.llm.client.run_tool", fake_tool)
-    c = ctx([ChatResult(None, [call("search_news", '{"query": "x"}')]),
-             ChatResult("See A (2026-11-20) u/1", [])])  # fmt: skip
-    assert [s["article_id"] for s in chat([{"role": "user", "content": "x"}], c).sources] == [1]
+def test_emit_reports_tool_progress_and_tokens(monkeypatch):
+    monkeypatch.setattr("backend.llm.client.run_tool", lambda c, n, a: {"ok": True})
+    events = []
+    c = ctx([ChatResult(None, [call("get_results")]), ChatResult("Two words", [])])
+    chat([{"role": "user", "content": "x"}], c, emit=lambda e, d: events.append((e, d)))
+    kinds = [(e, d.get("status") or d.get("text")) for e, d in events]
+    assert kinds[:2] == [("tool_call", "started"), ("tool_call", "finished")]
+    assert "".join(d["text"] for e, d in events if e == "token").strip() == "Two words"

@@ -35,7 +35,9 @@ class LLMProvider(Protocol):
 
 
 class AzureOpenAIProvider:
-    """Azure OpenAI v1 API. Retries (429, 5xx, timeouts) use the SDK's exponential backoff.
+    """Azure OpenAI v1 API. Retries (429, 5xx, timeouts) use the SDK's exponential backoff,
+    which honours Retry-After; 8 retries because parallel eval runs hit the deployment's
+    per-minute token limit.
 
     GPT-5 family deployments reject `temperature` and `max_tokens`, so neither is sent;
     `max_completion_tokens` caps the answer (reasoning tokens count toward it).
@@ -53,7 +55,7 @@ class AzureOpenAIProvider:
         base = cfg.azure_openai_endpoint.rstrip("/")
         if not base.endswith("/openai/v1"):
             base += "/openai/v1"
-        self.client = OpenAI(base_url=base, api_key=cfg.azure_openai_api_key, max_retries=4)
+        self.client = OpenAI(base_url=base, api_key=cfg.azure_openai_api_key, max_retries=8)
         self.chat_deployment = chat_deployment or cfg.azure_openai_chat_deployment
         self.embedding_deployment = cfg.azure_openai_embedding_deployment
         self.conn = conn
@@ -97,6 +99,43 @@ class AzureOpenAIProvider:
             ToolCall(c.id, c.function.name, c.function.arguments) for c in msg.tool_calls or []
         ]
         return ChatResult(msg.content, calls, cost)
+
+    def chat_stream(self, messages, tools=None, on_delta=None, purpose="chat") -> ChatResult:
+        """Like chat(), but streams: on_delta(text) gets each content token as it arrives."""
+        started = time.monotonic()
+        kwargs: dict[str, Any] = {
+            "max_completion_tokens": self.max_completion_tokens,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if tools:
+            kwargs["tools"] = tools
+        content: list[str] = []
+        calls: dict[int, dict] = {}
+        model, usage = self.chat_deployment, None
+        for chunk in self.client.chat.completions.create(
+            model=self.chat_deployment, messages=messages, **kwargs
+        ):
+            model = chunk.model or model
+            usage = chunk.usage or usage
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta.content:
+                content.append(delta.content)
+                if on_delta:
+                    on_delta(delta.content)
+            for tc in delta.tool_calls or []:
+                c = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                c["id"] = tc.id or c["id"]
+                if tc.function:
+                    c["name"] += tc.function.name or ""
+                    c["arguments"] += tc.function.arguments or ""
+        cost = self._record("chat", model, self.chat_deployment, usage, started, purpose)
+        tool_calls = [
+            ToolCall(c["id"], c["name"], c["arguments"]) for _, c in sorted(calls.items())
+        ]
+        return ChatResult("".join(content) or None, tool_calls, cost)
 
     def embed(self, texts, purpose="embedding") -> list[list[float]]:
         started = time.monotonic()

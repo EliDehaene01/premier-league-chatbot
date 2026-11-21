@@ -202,6 +202,34 @@ CREATE TABLE IF NOT EXISTS public.llm_calls (
     purpose           text                     -- chat | build_index | retrieval | ...
 );
 
+-- one row per answered chat turn from the API, and the feedback people leave on them
+CREATE TABLE IF NOT EXISTS public.chat_turns (
+    turn_id         uuid PRIMARY KEY,
+    conversation_id text NOT NULL,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    question        text NOT NULL,
+    answer          text,
+    tools           jsonb NOT NULL DEFAULT '[]',
+    sources         jsonb NOT NULL DEFAULT '[]',
+    prompt_version  text,
+    cost_usd        numeric(12, 6),
+    latency_ms      int,
+    error           text
+);
+
+CREATE TABLE IF NOT EXISTS public.feedback (
+    id              bigserial PRIMARY KEY,
+    turn_id         uuid NOT NULL REFERENCES public.chat_turns,
+    conversation_id text NOT NULL,
+    rating          text NOT NULL CHECK (rating IN ('up', 'down')),
+    comment         text,
+    question        text NOT NULL,
+    answer          text,
+    tools           jsonb NOT NULL DEFAULT '[]',
+    prompt_version  text,
+    created_at      timestamptz NOT NULL DEFAULT now()
+);
+
 -- gold: what the chatbot's tools read
 CREATE OR REPLACE VIEW gold.league_table_current AS
 SELECT s.position, c.name AS club, s.club_id, s.played, s.won, s.drawn, s.lost,

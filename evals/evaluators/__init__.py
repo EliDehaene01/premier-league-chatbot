@@ -2,7 +2,9 @@
 
 A transcript is a dict built by the runner from one chat turn:
   answer: str, question: str, calls: [{name, arguments: dict, error?}],
-  tool_outputs: [str (JSON text the model saw)], retrieved: [search_news result dicts]
+  tool_outputs: [str (JSON text the model saw)], retrieved: [search_news result dicts],
+  cited: [structured sources the answer cites, see backend/llm/citations.py],
+  dropped: [citation markers the backend dropped because no tool returned them]
 """
 
 import json
@@ -141,6 +143,7 @@ def tool_selection(case: dict, t: dict, conn=None) -> Check:
 SEASON = re.compile(r"\b20\d\d[-/](?:20)?\d\d\b")
 URL = re.compile(r"https?://\S+")
 LIST_MARKER = re.compile(r"^\s*\d+[.)]\s", re.MULTILINE)
+CITATION_MARKER = re.compile(r"\[\d+\]")
 NUMBER = re.compile(r"(?<![\w.])\d+(?:\.\d+)?")
 
 
@@ -149,6 +152,7 @@ def _norm_num(n: str) -> str:
 
 
 def numbers(text: str) -> set[str]:
+    text = CITATION_MARKER.sub(" ", text)
     text = LIST_MARKER.sub(" ", SEASON.sub(" ", URL.sub(" ", text)))
     return {_norm_num(n) for n in NUMBER.findall(text.replace(",", ""))}
 
@@ -165,30 +169,28 @@ def no_ungrounded_numbers(case: dict, t: dict, context_numbers=frozenset()) -> C
                  f"numbers not in any tool result: {loose}" if loose else "")  # fmt: skip
 
 
-# ---------- citations
-
-CITED = re.compile(r"https?://[^\s)\]>\"']+")
-
-
-def cited_urls(answer: str) -> list[str]:
-    return list(dict.fromkeys(u.rstrip(".,;:") for u in CITED.findall(answer)))
+# ---------- citations (structured: markers validated and resolved by the backend)
 
 
 def citation(case: dict, t: dict) -> Check:
-    cited = cited_urls(t["answer"])
-    returned = {r["url"] for r in t["retrieved"]}
+    """At least one valid citation, no invented markers, the expected article among them.
+    News answers must cite an article; other answers may cite match, table or club sources."""
+    cited, dropped = t.get("cited") or [], t.get("dropped") or []
     expected = (case.get("golden") or {}).get("articles") or []
     if not cited:
-        return Check(False, 0.0, "no article cited")
-    precision = sum(u in returned for u in cited) / len(cited)
-    hit = not expected or any(f"/news/{a}/" in u or u.endswith(f"/news/{a}")
-                              for u in cited for a in expected)  # fmt: skip
+        return Check(
+            False, 0.0, "nothing cited" + (f"; dropped markers {dropped}" if dropped else "")
+        )
     problems = []
-    if precision < 1:
-        problems.append(f"cited URLs not returned by search_news: "
-                        f"{[u for u in cited if u not in returned]}")  # fmt: skip
-    if not hit:
-        problems.append(f"none of the expected articles {expected} cited")
+    if dropped:
+        problems.append(f"markers not returned by any tool were dropped: {dropped}")
+    articles = [s["id"] for s in cited if s["kind"] == "article"]
+    hit = not expected or any(f"a{a}" in articles for a in expected)
+    if expected and not hit:
+        problems.append(f"none of the expected articles {expected} cited (cited {articles})")
+    if case.get("category") == "news" and not articles:
+        problems.append("news answer cites no article")
+    precision = len(cited) / (len(cited) + len(dropped))
     return Check(not problems, precision * (1.0 if hit else 0.5), "; ".join(problems))
 
 
@@ -226,7 +228,7 @@ def transcript(question: str, answer: str, messages: list[dict]) -> dict:
             except ValueError:
                 args = {}
             calls.append({"name": tc["function"]["name"], "arguments": args})
-    outputs, retrieved = [], []
+    outputs, retrieved = [], []  # retrieved: search_news results with source_id, title, text
     for m in messages:
         if m.get("role") != "tool":
             continue

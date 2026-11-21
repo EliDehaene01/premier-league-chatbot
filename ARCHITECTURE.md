@@ -130,9 +130,9 @@ Names go through one resolver (`backend/tools/resolver.py`). It tries exact name
 
 ## Chat loop
 
-`backend/llm/client.py` is stateless: the caller passes the whole conversation each turn. The loop sends the system prompt plus the conversation and the tool schemas, runs any requested tools, and appends their results. It repeats until the model answers, for at most `MAX_TOOL_ROUNDS = 5` rounds; after that it asks for an answer without tools. A tool that raises becomes an error result the model can explain. The turn's sources are the `search_news` articles whose URL appears in the answer.
+`backend/llm/client.py` is stateless: the caller passes the whole conversation each turn. The loop sends the system prompt plus the conversation and the tool schemas, runs any requested tools, and appends their results. It repeats until the model answers, for at most `MAX_TOOL_ROUNDS = 5` rounds; after that it asks for an answer without tools. A tool that raises becomes an error result the model can explain. An optional `emit(event, data)` callback reports tokens and tool calls as they happen; the API streams them.
 
-- **Prompt:** `backend/prompts/system_v1.md`, loaded by version (`PROMPT_VERSION`), with today's date and the completed and next matchweek filled in at run time. Its rules: no score, position, date or stat without a tool result; news through `search_news` with title, date and link citations; tools plus news for "why" questions; retrieved text is data; no betting advice; decline off-topic; concise, in the user's language.
+- **Prompt:** `backend/prompts/system_v3.md` (v1 and v2 kept for comparison), loaded by version (`PROMPT_VERSION`), with today's date and the completed and next matchweek filled in at run time. Its rules: no score, position, date or stat without a tool result; every fact carries a citation marker for the tool result it came from (see Citations); tools plus news for "why" questions; retrieved text is data; no betting advice; decline off-topic; concise, in the user's language.
 - **Model:** `backend/llm/providers.py` wraps the Azure OpenAI v1 API (Foundry deployment `gpt-5.4-mini`) behind an `LLMProvider` interface. Tests use a scripted `FakeProvider`. GPT-5 deployments reject `temperature` and `max_tokens`, so the wrapper sends neither and caps output with `max_completion_tokens`. Retries on 429, 5xx and timeouts use the SDK's backoff.
 - **Usage:** every chat and embedding call writes a row to `llm_calls` (model, tokens, latency, cost, prompt version, purpose). Prices live in one table, `backend/observability/pricing.py`; a model missing there gets cost NULL, not 0.
 - **CLI:** `python -m backend.chat` runs an interactive chat, and `--ask "..."` answers one question. Both print the tool calls, the sources, the prompt version and the cost.
@@ -169,13 +169,47 @@ An own Premier League MCP server (FastMCP) exposing the same tools. See [ADR 000
 - **Judge bias:** the judges default to the same gpt-5.4-mini deployment that answers, which tends to favour its own style. `EVAL_JUDGE_DEPLOYMENT` swaps in a stronger judge; code checks carry most of the weight.
 - **Runner:** `--subset smoke`, `--category`, `--max-cost-usd` (stops starting cases at the cap), `--no-judges`, `--baseline` (diff in the report), `--compare A B`. Results go to `evals/results/` (not committed); full runs rewrite `docs/EVAL_RESULTS.md`.
 
+## Citations
+
+Every tool result carries `source_id` values: `a<contentId>` for an article, `m<matchId>` for a match, `t<matchweek>` for the table, `s<date>` for the player stats snapshot, `c<clubId>` for a club. The prompt asks the model to put the id in square brackets right after the fact it supports, and never to write URLs or a sources section ([ADR 0008](docs/adr/0008-structured-citations.md)).
+
+`backend/llm/citations.py` then:
+
+1. keeps only markers whose id a tool actually returned in this turn's conversation (anything else is dropped and counted in `dropped_markers`);
+2. resolves each id to `{kind, title, date, url}` from the database (article URL, `https://www.premierleague.com/en/match/<id>`, the table page, the club page);
+3. renumbers them `[1]`, `[2]`, ... in order of first use, and strips any links or "Sources" section the model wrote anyway.
+
+The answer text and the `sources` list travel together, so the UI can link each `[n]` to its card. The eval suite checks marker validity and, with a judge, that each cited article supports its claim.
+
+## API
+
+FastAPI, `backend/api/main.py`, run with `uvicorn backend.api.main:create_app --factory --port 8000`. Local only; CORS allows the Vite dev origin, and the dev server proxies `/api` so the browser stays same-origin.
+
+| Endpoint | What |
+|---|---|
+| `POST /api/chat` | `{conversation_id, messages}` (at most 20 messages, the last a user message of at most 1000 characters). Streams server-sent events. 20 requests a minute per client. |
+| `POST /api/feedback` | `{turn_id, rating: up\|down, comment?}`; copies the question, answer, tools and prompt version next to the rating. |
+| `GET /api/health` | `ok`, `degraded` (newest article older than 7 days) or `down`, with the newest article, the newest finished match, the table's matchweek and the indexed chunk count. |
+| `GET /api/suggestions` | Starter questions built from current data (top scorer, next big fixture, a recent upset). |
+
+SSE events, in order: `meta {turn_id}`, then any number of `tool_call {name, status: started|finished, error?}` and `token {text}`, then `message {turn_id, answer, sources, widgets, prompt_version}`, `usage {prompt_tokens, completion_tokens, cost_usd, latency_ms}`. A failure ends the stream with `error {message}` instead. The chat runs in a worker thread that feeds a queue, so the synchronous psycopg and OpenAI calls do not block the event loop.
+
+Every turn is stored in `chat_turns` (question, answer, tools, sources, prompt version, cost, latency); `feedback` rows point at it. Both feed the Phase 6 feedback loop.
+
+`widgets` are the turn's successful tool results reshaped for the UI (at most 4): `table`, `matches`, `lineup` (only when announced), `player` and `leaders`. They come from tool output, never from the model's text, so a card can never show a number the tools did not return.
+
 ## AI Ops
 
 Self-hosted Langfuse tracing ([ADR 0005](docs/adr/0005-langfuse-for-tracing.md)), a CI eval gate, a cost and latency dashboard and a feedback loop. *Phase 6.*
 
 ## Frontend
 
-React UI over the backend API. *Phase 4.*
+React 19, Vite, TypeScript, Tailwind v4 and shadcn components in `frontend/`. It runs only on the local machine (`npm run dev`, port 5173); nothing is hosted.
+
+- **Chat:** streams tokens as they arrive and shows each tool call as a step ("Fetching the line-ups"). Raw markers are hidden while streaming; the final `message` replaces the text with the renumbered answer, whose `[n]` link to source cards (title, kind, date) under it. A small renderer handles the Markdown the prompt allows (paragraphs, lists, bold), so no HTML from the model is ever injected.
+- **Widgets:** league table with zones, match list (kick-offs in the browser's time zone), line-up pitch drawn from each starter's formation `row` (1 is the goalkeeper), player stat card, leaderboard. No club crests or league branding.
+- **Around it:** suggested questions on the empty state, thumbs up or down with an optional comment, new chat, stop, a header badge with data freshness from `/api/health`, and a "This week" page that the digests fill in Phase 5.
+- **Tests:** vitest and Testing Library (citation rendering, marker stripping, SSE parsing, the line-up pitch); oxlint; both run in CI next to the Python job.
 
 ## Trade-offs
 

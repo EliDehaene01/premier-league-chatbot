@@ -54,6 +54,8 @@ def _match(row: dict) -> dict:
     out = {k: v for k, v in row.items() if v is not None}
     if isinstance(out.get("kickoff_utc"), datetime):
         out["kickoff_utc"] = out["kickoff_utc"].isoformat()
+    if "match_id" in out:
+        out["source_id"] = f"m{out['match_id']}"  # cite as [m<id>]; see backend/llm/citations.py
     return out
 
 
@@ -73,7 +75,7 @@ def get_league_table(ctx: ToolContext, as_of_matchweek: int | None = None) -> di
         "WHERE s.matchweek = %s ORDER BY s.position",
         (mw,),
     )
-    return {"after_matchweek": mw, "table": table}
+    return {"after_matchweek": mw, "source_id": f"t{mw}", "table": table}
 
 
 def get_fixtures(ctx, club=None, date_from=None, date_to=None, limit: int = 10) -> dict:
@@ -204,6 +206,8 @@ def get_match_lineup(ctx, match_id=None, club=None, opponent=None, date=None) ->
         for p in (p for p in players if p["club_id"] == t["club_id"]):
             pid = p["player_id"]
             row = {"name": p["name"], "shirt": p["shirt_num"], "position": p["position"]}
+            if p["is_starter"]:  # formation row, 1 = goalkeeper; the UI draws the pitch from it
+                row["row"] = p["formation_row"]
             if p["is_captain"]:
                 row["captain"] = True
             for e in events:
@@ -237,7 +241,12 @@ def get_top_scorers(ctx, limit: int = 10, stat: str = "goals") -> dict:
     as_of = rows[0]["snapshot_date"].isoformat() if rows else None
     for r in rows:
         r.pop("snapshot_date")
-    return {"stat": stat, "as_of": as_of, "players": rows}
+    return {
+        "stat": stat,
+        "as_of": as_of,
+        "source_id": f"s{as_of}" if as_of else None,
+        "players": rows,
+    }
 
 
 def get_player_stats(ctx, name: str) -> dict:
@@ -256,6 +265,7 @@ def get_player_stats(ctx, name: str) -> dict:
         return out
     s = rows[0]
     out["as_of"] = s["snapshot_date"].isoformat()
+    out["source_id"] = f"s{out['as_of']}"
     out["season_stats"] = {k: s[k] for k in ("appearances", "starts", "minutes", "goals",
                            "assists", "clean_sheets", "yellow_cards", "red_cards")}  # fmt: skip
     out["season_stats"] |= {k: s["stats"][k] for k in PLAYER_EXTRAS if k in s["stats"]}
@@ -274,8 +284,8 @@ def get_club_info(ctx, club: str) -> dict:
                       "WHERE club_id = %s", (club_id,))[0]  # fmt: skip
     standing = _rows(
         ctx,
-        "SELECT position, played, points, goal_difference, matchweek "
-        "FROM gold.league_table_current WHERE club_id = %s",
+        "SELECT position, played, won, drawn, lost, goals_for, goals_against, goal_difference, "
+        "points, matchweek FROM gold.league_table_current WHERE club_id = %s",
         (club_id,),
     )
     form = _rows(ctx, "SELECT form, points FROM gold.club_form_last5 WHERE club_id = %s",
@@ -283,6 +293,7 @@ def get_club_info(ctx, club: str) -> dict:
     squad = _rows(ctx, "SELECT count(*) AS n FROM silver.players WHERE club_id = %s", (club_id,))
     return {
         **info,
+        "source_id": f"c{club_id}",
         "table": standing[0] if standing else None,
         "form_last5_oldest_first": form[0] if form else None,
         "squad_size": squad[0]["n"],
@@ -313,9 +324,11 @@ def search_news(ctx, query: str, club: str | None = None, days: int | None = Non
     if checked.error:
         return {"error": "news retrieval is unavailable right now (safety check failed); "
                          "say so and do not answer from memory", "results": []}  # fmt: skip
-    results = [{k: h[k] for k in ("article_id", "title", "date", "url", "text")}
+    # the model sees a source_id to cite, not the URL (URLs are built server-side when citing)
+    results = [{"source_id": f"a{h['article_id']}", **{k: h[k] for k in ("title", "date", "text")}}
                for h in checked.safe]  # fmt: skip
-    ctx.sources.extend({k: r[k] for k in ("article_id", "title", "date", "url")} for r in results)
+    ctx.sources.extend({k: h[k] for k in ("article_id", "title", "date", "url")}
+                       for h in checked.safe)  # fmt: skip
     out: dict = {"results": results}
     if checked.flagged:
         out["dropped_by_safety_check"] = len(checked.flagged)

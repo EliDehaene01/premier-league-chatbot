@@ -36,6 +36,17 @@ python -m evals.retrieval_smoke              # retrieval sanity check: hit@5 and
 
 Needs the Azure OpenAI and Content Safety settings in `.env` (see `.env.example`).
 
+## Web app
+
+Runs on your machine only; nothing is deployed.
+
+```bash
+uvicorn backend.api.main:create_app --factory --port 8000   # API (needs the .env settings)
+cd frontend && npm ci && npm run dev                          # UI on http://localhost:5173
+```
+
+Frontend checks: `npm run lint`, `npm test`, `npm run build`.
+
 ## Evals
 
 ```bash
@@ -60,6 +71,6 @@ Each ingestion mode ends with data-quality checks and exits non-zero if one fail
 | 1 | Ingestion: bronze / silver / gold | done |
 | 2 | RAG + tools + chat loop | done |
 | 3 | Evals dataset | done |
-| 4 | API + React UI | next |
-| 5 | Weekly digests (GitHub Pages) + own MCP server | |
+| 4 | API + React UI + structured citations | done |
+| 5 | Weekly digests (GitHub Pages) + own MCP server | next |
 | 6 | AI Ops: tracing, CI eval gate, dashboards, feedback | |

@@ -27,6 +27,13 @@ class FakeProvider:
         self.chat_calls.append({"messages": list(messages), "tools": tools})
         return self.script.pop(0)
 
+    def chat_stream(self, messages, tools=None, on_delta=None, purpose="chat") -> ChatResult:
+        result = self.chat(messages, tools, purpose)
+        for word in (result.content or "").split():  # replay the answer word by word
+            if on_delta:
+                on_delta(word + " ")
+        return result
+
     def embed(self, texts, purpose="embedding"):
         return [word_vector(t) for t in texts]
 

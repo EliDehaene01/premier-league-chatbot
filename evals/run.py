@@ -204,12 +204,30 @@ def run(
         with lock:
             spent["usd"] += (result["cost_usd"] or 0) + (result["judge_cost_usd"] or 0)
         status = "PASS" if result["passed"] else "FAIL"
-        print(f"{status}  {case['id']:<22} {case['question'][:60]}", flush=True)
+        line = f"{status}  {case['id']:<22} {case['question'][:60]}"
+        print("\n".join([line, *why_failed(result)]), flush=True)
         return result
 
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         results = [r for r in pool.map(job, cases) if r is not None]
     return results, spent["capped"]
+
+
+def why_failed(result: dict) -> list[str]:
+    """Indented lines under a FAIL: each failing check and the start of the answer, so a CI
+    log shows why without downloading the results file."""
+    if result["passed"]:
+        return []
+    out = [
+        f"      {k}: {(c.get('detail') or '')[:200]}"
+        for k, c in result.get("checks", {}).items()
+        if c.get("passed") is False
+    ]
+    if result.get("error"):
+        out.append(f"      error: {str(result['error'])[:200]}")
+    calls = ", ".join(c["name"] for c in result.get("tool_calls", [])) or "none"
+    answer = (result.get("answer") or "")[:200].replace("\n", " ")
+    return [*out, f"      tools: {calls}", f"      answer: {answer}"]
 
 
 def _pct(values, q):

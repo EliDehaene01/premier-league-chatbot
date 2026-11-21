@@ -20,7 +20,8 @@ def show(turn) -> None:
         print(f"  [tool via {via}] {c['name']}({c['arguments']}){err}")
     print(f"\n{turn.answer}\n")
     for s in turn.sources:
-        print(f"  [source] {s['title']} ({s['date']}) {s['url']}")
+        date = f" ({s['date']})" if s.get("date") else ""
+        print(f"  [source] {s['title']}{date} {s['url']}")
     cost = "unknown" if turn.cost_usd is None else f"${turn.cost_usd:.4f}"
     print(f"  [prompt {turn.prompt_version}, cost {cost}]\n")
 

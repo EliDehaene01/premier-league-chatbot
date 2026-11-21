@@ -226,6 +226,16 @@ The key idea: **code gathers the facts, the model only writes the sentences, and
    - how recent it is.
 
    The weights are in a config file, so the same week always gives the same ranking, and changing it is a deliberate, reviewed change. The top 7 go through.
+
+   The score is three parts added together (weights from `digests/weights.yaml`):
+
+   | Part | Formula | What it rewards |
+   |---|---|---|
+   | Coverage | 1.0 × ln(1 + number of articles) | stories the Premier League wrote about more. The logarithm grows slowly: 1 article gives 0.69, 3 give 1.39, 7 give 2.08. A story with many articles counts more, but can't drown out everything else. |
+   | Type | a fixed number per story type | what matters most to fans: title race 1.6, manager change 1.5, relegation race 1.4, key injury 1.2, record 1.0, match reaction and suspension 0.9, transfer 0.8, award 0.7, match preview 0.5, other 0.3 |
+   | Recency | 1.0 × 0.5^(age in days / 3) | fresh news: it halves every 3 days, so today is 1.0, 3 days old 0.5, 6 days old 0.25 (age of the story's newest article) |
+
+   For example, a key injury covered by 3 articles, the newest a day old, scores 1.39 + 1.2 + 0.79 = **3.38**. A transfer story with 7 articles, the newest 5 days old, scores 2.08 + 0.8 + 0.31 = **3.19**. An award announced today in one article scores 0.69 + 0.7 + 1.0 = **2.39**. So the injury comes first, then the transfer, then the award.
 4. **Safety check, then write.** The article text passes Prompt Shields. Then the model writes one short summary per story, plus a headline and intro, each line citing its articles.
 5. **Check, store and publish** as for the recap.
 

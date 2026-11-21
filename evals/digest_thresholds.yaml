@@ -1,11 +1,12 @@
 # Minimums for `python -m evals.digests`; it exits non-zero below any value that is set.
-# null = report only: no digest run has been measured yet. After the first full run, set each
-# to the measured score minus one case of slack (as in thresholds.yaml), and never lower one.
+# Set from the first full run digests-20261121T180924Z (5 cases: 3 recaps, 2 news):
+# each value is the measured pass rate minus one case of slack, rounded down to 0.05 (as in
+# thresholds.yaml). Never raise a value above what a full run achieves, and never lower one.
 checks:
-  citations: null      # every kept line cites at least one resolvable source
-  scores_match: null   # every score in a kept line equals its cited match's score
-  coverage: null       # recap: every played fixture is in the digest
-  must_mention: null   # the hand-labelled stories or clubs appear
-  format: null         # headline length, section and bullet counts
-  kept_rate: null      # share of model-written lines that survived validation
-  faithfulness: null   # judge: each line is supported by the facts or articles it cites
+  citations: 0.80      # measured 1.00 over 5; every kept line cites a resolvable source
+  scores_match: 0.80   # measured 1.00 over 5; every score in a kept line equals its match's score
+  coverage: 0.65       # measured 1.00 over 3; recap: every played fixture is in the digest
+  must_mention: 0.00   # measured 0.50 over 2; the hand-labelled stories or clubs appear
+  format: 0.80         # measured 1.00 over 5; headline length, section and bullet counts
+  kept_rate: 0.80      # measured 1.00 over 5; share of model-written lines that survived validation
+  faithfulness: 0.00   # measured 0.00 over 5 (line scores 0.33-0.84); judge: lines supported by sources

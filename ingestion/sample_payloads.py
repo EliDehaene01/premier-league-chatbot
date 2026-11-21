@@ -118,3 +118,28 @@ ARTICLES = {
          "tags": [{"id": 715, "label": "series:fantasy"}], "references": [], "body": ""},
     ],
 }  # fmt: skip
+
+
+def _lineup_player(id_, first, last, shirt, pos, captain=False):
+    return {"firstName": first, "lastName": last, "shirtNum": str(shirt), "isCaptain": captain,
+            "id": id_, "position": pos}  # fmt: skip
+
+
+LINEUPS = {
+    "home_team": {
+        "teamId": "3",
+        "formation": {"teamId": "3", "formation": "1-1", "lineup": [["154561"], ["219847"]],
+                      "subs": ["481655"]},
+        "players": [_lineup_player("154561", "David", "Raya", 1, "Goalkeeper"),
+                    _lineup_player("219847", "Kai", "Havertz", 29, "Forward", captain=True),
+                    _lineup_player("481655", "Max", "Dowman", 56, "Midfielder")],
+        "managers": [{"firstName": "Mikel", "lastName": "Arteta", "id": "51018",
+                      "type": "Manager"}],
+    },
+    "away_team": {"teamId": "9", "formation": {}, "players": [], "managers": []},
+}  # fmt: skip
+
+LINEUPS_NOT_ANNOUNCED = {
+    "home_team": {"players": [], "teamId": "9", "formation": {}, "managers": []},
+    "away_team": {"players": [], "teamId": "3", "formation": {}, "managers": []},
+}

@@ -6,7 +6,7 @@ import respx
 from backend.config import Settings
 from backend.rag.chunking import chunk_article, content_hash, header, split_text
 from backend.rag.retrieval import recency_weight, rrf_fuse
-from backend.rag.shields import shield
+from backend.rag.shields import _batches, shield
 
 NOW = datetime(2026, 11, 21, tzinfo=UTC)
 
@@ -78,3 +78,10 @@ def test_shields_fail_closed():
     assert r.safe == [] and r.error
     respx.post(URL).respond(json={"unexpected": True})  # malformed response
     assert shield(CHUNKS, "q", CFG, httpx.Client()).safe == []
+
+
+def test_shield_batches_respect_service_limits():
+    small = [{"text": "x" * 100}] * 12
+    assert [len(b) for b in _batches(small)] == [5, 5, 2]  # at most 5 documents per call
+    big = [{"text": "y" * 4000}] * 3
+    assert [len(b) for b in _batches(big)] == [2, 1]  # at most ~10k characters per call

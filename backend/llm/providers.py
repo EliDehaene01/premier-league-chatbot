@@ -47,21 +47,32 @@ class AzureOpenAIProvider:
         cfg: Settings = settings,
         prompt_version: str | None = None,
         max_completion_tokens: int = 4000,
+        chat_deployment: str | None = None,
+        purpose_prefix: str = "",
     ):
         base = cfg.azure_openai_endpoint.rstrip("/")
         if not base.endswith("/openai/v1"):
             base += "/openai/v1"
         self.client = OpenAI(base_url=base, api_key=cfg.azure_openai_api_key, max_retries=4)
-        self.chat_deployment = cfg.azure_openai_chat_deployment
+        self.chat_deployment = chat_deployment or cfg.azure_openai_chat_deployment
         self.embedding_deployment = cfg.azure_openai_embedding_deployment
         self.conn = conn
         self.prompt_version = prompt_version
         self.max_completion_tokens = max_completion_tokens
+        self.purpose_prefix = purpose_prefix  # e.g. "eval:" to tell eval traffic apart
+        # running totals for this provider instance (the eval runner uses one per case)
+        self.usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost_usd": 0.0}
 
     def _record(self, kind, model, deployment, usage, started, purpose) -> float | None:
         prompt = getattr(usage, "prompt_tokens", 0) or 0
         completion = getattr(usage, "completion_tokens", 0) or 0
         cost = cost_usd(model, prompt, completion)
+        u = self.usage
+        u["calls"] += 1
+        u["prompt_tokens"] += prompt
+        u["completion_tokens"] += completion
+        u["cost_usd"] = None if cost is None or u["cost_usd"] is None else u["cost_usd"] + cost
+        purpose = self.purpose_prefix + purpose
         if self.conn is not None:
             self.conn.execute(
                 "INSERT INTO llm_calls (kind, model, deployment, prompt_tokens, "

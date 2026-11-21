@@ -13,6 +13,7 @@ Both hosts are the same unauthenticated JSON APIs that www.premierleague.com its
 | Fixtures and results | SDP `v2/matches?competition=8&season={season}` and `v1/competitions/8/seasons/{season}/matchweeks/{mw}/matches` | works |
 | One match | SDP `v1/matches/{matchId}` | works |
 | Match events (goals, cards, subs) | SDP `v1/matches/{matchId}/events` | works |
+| Line-ups | SDP `v3/matches/{matchId}/lineups` | works: `home_team`/`away_team` with `formation{formation, lineup: rows of player ids goalkeeper first, subs}`, `players[]` (firstName, lastName, knownName, shirtNum, isCaptain, position, id), `managers[]`. Before publication (about an hour before kick-off) both teams come back with empty players and formation. |
 | Clubs (incl. stadium, city, capacity) | SDP `v1/competitions/8/seasons/{season}/teams` | works |
 | Squads | SDP `v1/competitions/8/seasons/{season}/teams/{teamId}/squad` | works |
 | Player season stats, top scorers | SDP `v1/competitions/8/seasons/{season}/players/stats/leaderboard?_sort=goals:desc` | works (80+ stat fields per player) |

@@ -32,6 +32,7 @@ def db(db_url):
         conn.execute(
             "TRUNCATE bronze.api_responses, silver.clubs, silver.players, silver.matches, "
             "silver.match_events, silver.standings_snapshots, silver.player_season_stats, "
-            "silver.articles, silver.article_chunks, llm_calls RESTART IDENTITY"
+            "silver.match_lineups, silver.match_lineup_players, silver.articles, "
+            "silver.article_chunks, llm_calls RESTART IDENTITY"
         )
         yield conn

@@ -30,7 +30,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e .
-      - run: python -m ingestion news --summary summary.json
+      - run: python -m ingestion news --no-index --summary summary.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

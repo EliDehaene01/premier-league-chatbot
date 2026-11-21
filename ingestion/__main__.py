@@ -14,7 +14,8 @@ from ingestion import quality
 from ingestion.pl_client import LEADERBOARD_SORTS, PLClient
 from ingestion.silver import load_from_bronze
 
-SILVER_TABLES = ["clubs", "players", "matches", "match_events", "standings_snapshots",
+SILVER_TABLES = ["clubs", "players", "matches", "match_events", "match_lineups",
+                 "match_lineup_players", "standings_snapshots",
                  "player_season_stats", "articles"]  # fmt: skip
 
 
@@ -56,12 +57,35 @@ def fetch_stats(client: PLClient, conn, season: int, all_events: bool) -> dict:
     todo = finished if all_events else (finished - have) | latest
     for match_id in sorted(todo):
         client.get_match_events(match_id)
-    return {"latest_finished_matchweek": mw, "events_fetched": len(todo)}
+    lined_up = {r[0] for r in conn.execute("SELECT DISTINCT match_id FROM silver.match_lineups")}
+    lineups = finished if all_events else (finished - lined_up) | latest
+    for match_id in sorted(lineups):
+        client.get_match_lineups(match_id)
+    return {"latest_finished_matchweek": mw, "events_fetched": len(todo),
+            "lineups_fetched": len(lineups)}  # fmt: skip
 
 
 def article_cutoff(conn) -> datetime:
     last = conn.execute("SELECT max(published_at) FROM silver.articles").fetchone()[0]
     return last - timedelta(days=1) if last else datetime.now(UTC) - timedelta(days=7)
+
+
+def update_index(conn) -> dict:
+    """Embed new or changed articles; reports chunks added and the embedding cost."""
+    from backend.llm.providers import AzureOpenAIProvider  # needs Azure settings only here
+    from backend.rag.build_index import build_index
+
+    last = conn.execute("SELECT coalesce(max(id), 0) FROM llm_calls").fetchone()[0]
+    try:
+        result = build_index(conn, AzureOpenAIProvider(conn))
+    except Exception as e:  # ingestion already succeeded; report the index failure loudly
+        return {"error": f"{type(e).__name__}: {e}"}
+    cost = conn.execute(
+        "SELECT coalesce(sum(cost_usd), 0) FROM llm_calls WHERE id > %s AND purpose = "
+        "'build_index'",
+        (last,),
+    ).fetchone()[0]
+    return {**result, "embedding_cost_usd": float(cost)}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -70,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--season", type=int, default=settings.pl_season)
     ap.add_argument("--since", default="2026-08-01", help="backfill: articles since this date")
     ap.add_argument("--summary", help="write a JSON summary to this path")
+    ap.add_argument("--no-index", action="store_true", help="matchweek/news: skip the RAG index")
     args = ap.parse_args(argv)
 
     conn = get_connection()
@@ -103,6 +128,9 @@ def main(argv: list[str] | None = None) -> int:
     except quality.QualityError as e:
         summary["quality"] = {"error": str(e)}
         code = 1
+    if args.mode in ("matchweek", "news") and not args.no_index:
+        summary["index"] = update_index(conn)
+        code = code or ("error" in summary["index"])
     out = json.dumps(summary, indent=2, default=str)
     print(out)
     if args.summary:

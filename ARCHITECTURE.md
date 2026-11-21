@@ -86,7 +86,7 @@ Two API quirks shape silver. First, the standings endpoint only returns the curr
 
 ### Scheduling
 
-The database is local-only, so the real scheduled runs happen on Eli's laptop through Windows Task Scheduler. `scripts/schedule_windows.ps1` registers them: `matchweek` on Monday 23:30 UTC (Tuesday 00:30 Brussels in winter) and `news` on Thursday 23:00 UTC (Friday 00:00 Brussels in winter). During summer time they fire an hour earlier in UTC; the script explains this. GitHub Actions runs the same two modes on the same cron times (`ingest-matchweek.yml`, `ingest-news.yml`) against a throwaway Postgres. That is a smoke test that the live sources still work and still match our parsers, and it uploads the JSON summary as an artifact.
+The database is local-only, so the real scheduled runs happen on Eli's laptop through Windows Task Scheduler. `scripts/schedule_windows.ps1` registers them: `matchweek` on Monday 23:30 UTC (Tuesday 00:30 Brussels in winter) and `news` on Thursday 23:00 UTC (Friday 00:00 Brussels in winter). During summer time they fire an hour earlier in UTC; the script explains this. GitHub Actions runs the same two modes on the same cron times (`ingest-matchweek.yml`, `ingest-news.yml`) against a throwaway Postgres. That is a smoke test that the live sources still work and still match our parsers, and it uploads the JSON summary as an artifact. After ingesting, `matchweek` and `news` also run the incremental RAG index build (only new or changed articles are embedded), so the chatbot sees the week's articles straight away. The chunks written and the embedding cost appear under `index` in the JSON summary. The GitHub workflows pass `--no-index` because they have no Azure credentials. The registered Task Scheduler tasks need no change, since they call the same entry point.
 
 ## Why tool calling for stats and RAG for news
 
@@ -117,8 +117,9 @@ query --> embed --> vector top 20 --\
 |---|---|
 | `get_league_table(as_of_matchweek?)` | the table, latest or after a stored matchweek |
 | `get_fixtures(club?, date_from?, date_to?, limit)` | upcoming matches, UTC |
-| `get_results(club?, matchweek?, limit)` | finished matches |
+| `get_results(club?, matchweek?, limit, oldest_first)` | finished matches |
 | `get_match_details(match_id \| club_a + club_b [+ date])` | score, scorers and assists, cards, substitutions |
+| `get_match_lineup(match_id \| club [+ opponent, date])` | formation, starting XI goalkeeper to attack, bench, captain, manager, per-player goals, assists, cards and sub minutes; fetched on demand for upcoming matches, "not announced" until about an hour before kick-off |
 | `get_top_scorers(stat goals\|assists\|clean_sheets, limit)` | leaderboards |
 | `get_player_stats(name)`, `compare_players(names)` | season stats and profile |
 | `get_club_info(club)` | stadium, position, last-5 form, next fixture, last result |
@@ -151,7 +152,22 @@ An own Premier League MCP server (FastMCP) exposing the same tools. See [ADR 000
 
 ## Evaluation
 
-An eval dataset and runner; changes to llm, rag, prompts, evals or mcp_server must pass it, and thresholds are never lowered to get green. *Phase 3.*
+`python -m evals.run --dataset chat_v1` runs every case through the real chat loop (real tools, Prompt Shields and model), scores it, and exits non-zero below `evals/thresholds.yaml`. Latest numbers: [docs/EVAL_RESULTS.md](docs/EVAL_RESULTS.md). Decision record: [ADR 0007](docs/adr/0007-eval-design.md).
+
+- **Dataset** (`evals/datasets/chat_v1.jsonl`, 165 cases, CHANGELOG in `evals/datasets/README.md`): 15 categories, from standings and player stats through news, "why" questions, time awareness and line-ups, to ambiguity, unanswerable, off-topic, betting and prompt injection. Each case lists its question, expected tools (a set; inner lists are alternatives), a golden, the checks that apply and tags; 25 cases tagged `smoke` cover every category.
+- **Goldens stay current:** data cases store a SQL query over the gold and silver tables, not a number. The runner executes it at eval time with `%(now)s` set to the eval date (default: now; `--eval-date` pins it), so "who is top", "last weekend" and "next match" stay correct as the season moves. News cases are pinned to dated articles by content id, with key facts that must appear.
+- **Evaluators** (`evals/evaluators/`), code first:
+  - `tool_selection`: recall of the expected tools, precision against wildly wrong ones, and argument checks through the resolver.
+  - `exact_answer`: golden values in the answer, normalised for numbers, accents, club short names and dates.
+  - `no_ungrounded_numbers`: every number in the answer appears in a tool result, the question or the system prompt.
+  - `citation`: cited URLs were returned by search_news, and an expected article is among them.
+  - `retrieval`: hit@5 and MRR, from searching the question directly.
+  - LLM judges only where code can't decide: `groundedness` (azure-ai-evaluation GroundednessEvaluator against everything the tools returned), `citation_support` (does the cited article back what the answer says), and `guardrail` (a rubric per case for declines, ambiguity and injections).
+  - Latency, tokens and cost come per case from the provider's usage totals; the rows also land in `llm_calls` with purpose `eval:*`.
+- **Injection tests** plant a fake article chunk in front of the real search results. It still goes through the real Prompt Shields, then the guardrail judge checks the answer did not obey it.
+- **Thresholds** come from the first full run with the current prompt: each is the measured score minus one case of slack, rounded down to 0.05. They are never raised above what a run achieves, and never lowered to get green. Category minimums apply to full runs only; the smoke subset is too small for them.
+- **Judge bias:** the judges default to the same gpt-5.4-mini deployment that answers, which tends to favour its own style. `EVAL_JUDGE_DEPLOYMENT` swaps in a stronger judge; code checks carry most of the weight.
+- **Runner:** `--subset smoke`, `--category`, `--max-cost-usd` (stops starting cases at the cap), `--no-judges`, `--baseline` (diff in the report), `--compare A B`. Results go to `evals/results/` (not committed); full runs rewrite `docs/EVAL_RESULTS.md`.
 
 ## AI Ops
 

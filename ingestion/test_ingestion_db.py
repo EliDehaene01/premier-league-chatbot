@@ -118,8 +118,12 @@ def test_cli_news_twice_adds_bronze_but_no_duplicate_articles(db, db_url, monkey
     sdp = respx.get(url__startswith=SDP_API).respond(404)
 
     summary = tmp_path / "s.json"
-    assert main(["news", "--summary", str(summary)]) == 0  # empty db: 7-day cutoff, 1 page
-    assert main(["news"]) == 0  # cutoff = newest article - 1 day: page 0, then empty page 1
+    assert (
+        main(["news", "--no-index", "--summary", str(summary)]) == 0
+    )  # empty db: 7-day cutoff, 1 page
+    assert (
+        main(["news", "--no-index"]) == 0
+    )  # cutoff = newest article - 1 day: page 0, then empty page 1
     assert json.loads(summary.read_text())["silver_counts"]["articles"] == 2
     assert counts(db)["articles"] == 2
     assert db.execute("SELECT count(*) FROM bronze.api_responses").fetchone()[0] == 3

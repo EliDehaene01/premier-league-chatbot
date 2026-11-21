@@ -36,6 +36,20 @@ python -m evals.retrieval_smoke              # retrieval sanity check: hit@5 and
 
 Needs the Azure OpenAI and Content Safety settings in `.env` (see `.env.example`).
 
+## Evals
+
+```bash
+pip install -e ".[dev,eval]"
+python -m evals.run --dataset chat_v1                 # 165 cases, about $1, rewrites docs/EVAL_RESULTS.md
+python -m evals.run --subset smoke                    # 25 cases, about $0.15
+python -m evals.run --category news --no-judges       # one category, code checks only
+python -m evals.run --compare evals/results/A.json evals/results/B.json
+```
+
+Exits non-zero below `evals/thresholds.yaml`. Latest results: [docs/EVAL_RESULTS.md](docs/EVAL_RESULTS.md).
+
+Weekly ingestion (`matchweek`, `news`) now also embeds new articles; `--no-index` skips that.
+
 Each ingestion mode ends with data-quality checks and exits non-zero if one fails; `--summary out.json` writes a run summary. To schedule the weekly runs on Windows, run `scripts/schedule_windows.ps1` once. Schema: [docs/ingestion_schema.md](docs/ingestion_schema.md).
 
 ## Status
@@ -45,7 +59,7 @@ Each ingestion mode ends with data-quality checks and exits non-zero if one fail
 | 0 | Setup and data source spike | done |
 | 1 | Ingestion: bronze / silver / gold | done |
 | 2 | RAG + tools + chat loop | done |
-| 3 | Evals dataset | next |
-| 4 | API + React UI | |
+| 3 | Evals dataset | done |
+| 4 | API + React UI | next |
 | 5 | Weekly digests (GitHub Pages) + own MCP server | |
 | 6 | AI Ops: tracing, CI eval gate, dashboards, feedback | |

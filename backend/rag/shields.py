@@ -13,7 +13,9 @@ from backend.config import Settings, settings
 
 log = logging.getLogger(__name__)
 API_VERSION = "2024-09-01"
-MAX_CHARS = 9000  # the service caps prompt + documents at 10k characters per call
+# service limits per call (checked 2026-11-21): at most 5 documents, 10,000 characters in total
+MAX_DOCS = 5
+MAX_CHARS = 9500
 
 
 @dataclass
@@ -23,14 +25,14 @@ class ShieldResult:
     error: str | None = None
 
 
-def _batches(chunks: list[dict], query: str):
-    batch, size = [], len(query)
+def _batches(chunks: list[dict]):
+    batch, size = [], 0
     for c in chunks:
-        if batch and size + len(c["text"]) > MAX_CHARS:
+        if batch and (len(batch) == MAX_DOCS or size + len(c["text"][:MAX_CHARS]) > MAX_CHARS):
             yield batch
-            batch, size = [], len(query)
+            batch, size = [], 0
         batch.append(c)
-        size += len(c["text"])
+        size += len(c["text"][:MAX_CHARS])
     if batch:
         yield batch
 
@@ -43,12 +45,15 @@ def shield(chunks: list[dict], query: str, cfg: Settings = settings, http=None) 
     http = http or httpx.Client(timeout=15)
     result = ShieldResult()
     try:
-        for batch in _batches(chunks, query[:1000]):
+        for batch in _batches(chunks):
             resp = http.post(
                 url,
                 params={"api-version": API_VERSION},
                 headers=headers,
-                json={"userPrompt": query[:1000], "documents": [c["text"] for c in batch]},
+                json={
+                    "userPrompt": query[:1000],
+                    "documents": [c["text"][:MAX_CHARS] for c in batch],
+                },
             )
             resp.raise_for_status()
             analysis = resp.json()["documentsAnalysis"]

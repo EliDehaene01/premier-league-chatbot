@@ -8,7 +8,7 @@ The chatbot's tools (table, matches, players, article search) are useful outside
 
 ## Decision
 
-Build an own MCP server with FastMCP in Phase 5 that exposes the same tool functions the chat loop uses, reading from the same gold tables.
+Build an own MCP server with FastMCP (`MCPServer` in the 2.x SDK) in Phase 5 that exposes the same tool functions the chat loop uses, reading from the same gold tables.
 
 ## Consequences
 

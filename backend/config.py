@@ -1,8 +1,13 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # the repo's .env wherever the process starts (MCP hosts launch the server from elsewhere)
+    model_config = SettingsConfigDict(env_file=ROOT / ".env", extra="ignore")
 
     postgres_user: str = "plc"
     postgres_password: str = ""
@@ -24,6 +29,11 @@ class Settings(BaseSettings):
     recency_half_life_days: float = 14.0
 
     pl_season: int = 2026
+
+    # how the chat reaches its tools: "mcp" (the Premier League MCP server, in-process unless
+    # mcp_url is set) or "direct" (plain function calls, the same tools without the protocol)
+    tool_transport: str = "mcp"
+    mcp_url: str = ""  # e.g. http://127.0.0.1:8765/mcp for `python -m mcp_server --http`
 
     database_url: str = ""  # DATABASE_URL wins over the POSTGRES_* parts when set
 

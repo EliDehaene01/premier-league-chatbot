@@ -1,6 +1,7 @@
 """API with a scripted model on the db test database. Marked db."""
 
 import json
+from contextlib import contextmanager
 from functools import partial
 
 import psycopg
@@ -10,8 +11,11 @@ from fastapi.testclient import TestClient
 from backend.api import main
 from backend.llm.fake_provider import FakeProvider, call
 from backend.llm.providers import ChatResult
+from backend.tools import ToolContext
 from ingestion.silver import load_from_bronze
 from ingestion.test_ingestion_db import fill_bronze
+from mcp_server.client import McpTools
+from mcp_server.server import build_server
 
 pytestmark = pytest.mark.db
 
@@ -29,9 +33,17 @@ class Scripted(FakeProvider):
 def client(db, db_url):
     fill_bronze(db)
     load_from_bronze(db)
-    app = main.create_app(connect=partial(psycopg.connect, db_url, autocommit=True),
-                          make_provider=lambda conn: Scripted())  # fmt: skip
-    return TestClient(app)
+    connect = partial(psycopg.connect, db_url, autocommit=True)
+
+    @contextmanager
+    def tool_context():  # what the MCP server runs each tool call with
+        with connect() as conn:
+            yield ToolContext(conn, FakeProvider())
+
+    with McpTools(build_server(tool_context)) as tools:  # tools reached over MCP, in-process
+        yield TestClient(
+            main.create_app(connect=connect, make_provider=lambda conn: Scripted(), tools=tools)
+        )
 
 
 def events(body: str) -> list[tuple[str, dict]]:

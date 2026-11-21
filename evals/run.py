@@ -12,6 +12,8 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -27,6 +29,8 @@ from backend.rag.retrieval import search
 from backend.tools import ToolContext
 from evals import evaluators as ev
 from evals.evaluators import judges
+from mcp_server.client import McpTools
+from mcp_server.server import build_server
 
 ROOT = Path(__file__).parent
 DATASETS = ROOT / "datasets"
@@ -69,7 +73,16 @@ def run_case(case, now, conn, provider, judge, use_judges=True) -> dict:
         ctx.shield = lambda chunks, q: shields.shield([*inject, *chunks], q)
     question = case["question"]
     started = time.monotonic()
-    turn = chat([*case.get("history", []), {"role": "user", "content": question}], ctx)
+    # through the MCP server, as users get it (TOOL_TRANSPORT=direct skips the protocol);
+    # the in-process server runs the tools with this case's context: its date, its shield
+    tools = None if settings.tool_transport == "direct" else McpTools(
+        build_server(lambda: nullcontext(ctx)))  # fmt: skip
+    try:
+        turn = chat([*case.get("history", []), {"role": "user", "content": question}],
+                    replace(ctx, tools=tools))  # fmt: skip
+    finally:
+        if tools:
+            tools.close()
     latency_ms = int((time.monotonic() - started) * 1000)
     t = ev.transcript(question, turn.answer, turn.messages)
     t["cited"], t["dropped"] = turn.sources, turn.dropped_markers

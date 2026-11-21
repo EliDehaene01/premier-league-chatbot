@@ -1,5 +1,6 @@
-# Eval gate: a pull request that changes how the chatbot answers must still pass the smoke
-# evals (25 cases of chat_v1, thresholds in evals/thresholds.yaml, never lowered to pass).
+# Eval gate: a pull request that changes how the chatbot answers must still pass the full
+# chat_v1 evals (165 cases, thresholds in evals/thresholds.yaml, never lowered to pass). The
+# 25-case smoke subset was tried first: with 1 to 4 cases per evaluator one answer flips it.
 #
 # It needs the Azure keys as repository secrets (Settings > Secrets and variables > Actions):
 # AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, CONTENT_SAFETY_ENDPOINT, CONTENT_SAFETY_API_KEY,
@@ -7,7 +8,7 @@
 # GitHub never passes secrets to workflows from forks, so outside pull requests cannot spend
 # them. Without the secrets the job says so and skips. One run: the season is ingested into a
 # throwaway Postgres (goldens are SQL run at eval time), the news index is built (about $0.01)
-# and the smoke subset costs about $0.15, capped at $0.75.
+# and the full run costs about $0.90, capped at $1.50.
 name: Eval gate
 
 on:
@@ -27,9 +28,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  smoke-evals:
+  evals:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -74,16 +75,16 @@ jobs:
       - name: Build the news index
         if: steps.keys.outputs.ok == 'true'
         run: python -m backend.rag.build_index
-      - name: Smoke evals
+      - name: Evals (chat_v1)
         if: steps.keys.outputs.ok == 'true'
-        run: python -m evals.run --subset smoke --max-cost-usd 0.75 --report eval-smoke.md
+        run: python -m evals.run --dataset chat_v1 --max-cost-usd 1.5 --report eval-report.md
       - name: Report
         if: always() && steps.keys.outputs.ok == 'true'
-        run: cat eval-smoke.md >> "$GITHUB_STEP_SUMMARY" || true
+        run: cat eval-report.md >> "$GITHUB_STEP_SUMMARY" || true
       - uses: actions/upload-artifact@v4
         if: always() && steps.keys.outputs.ok == 'true'
         with:
-          name: eval-smoke
+          name: eval-report
           path: |
-            eval-smoke.md
+            eval-report.md
             ingest.json

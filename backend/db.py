@@ -151,6 +151,35 @@ CREATE TABLE IF NOT EXISTS silver.articles (
 );
 CREATE INDEX IF NOT EXISTS articles_published_idx ON silver.articles (published_at DESC);
 
+-- RAG chunks of silver.articles; rebuilt per article when its content hash changes
+CREATE TABLE IF NOT EXISTS silver.article_chunks (
+    content_id   bigint NOT NULL REFERENCES silver.articles ON DELETE CASCADE,
+    chunk_index  int NOT NULL,
+    text         text NOT NULL,                -- header (title, date, tags) + chunk body
+    content_hash text NOT NULL,                -- of the article fields the chunks came from
+    embedding    vector(1536) NOT NULL,        -- text-embedding-3-small
+    tsv          tsvector GENERATED ALWAYS AS (to_tsvector('english', text)) STORED,
+    PRIMARY KEY (content_id, chunk_index)
+);
+CREATE INDEX IF NOT EXISTS article_chunks_embedding_idx
+    ON silver.article_chunks USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS article_chunks_tsv_idx ON silver.article_chunks USING gin (tsv);
+
+-- one row per LLM or embedding call (Phase 6 dashboards read this)
+CREATE TABLE IF NOT EXISTS public.llm_calls (
+    id                bigserial PRIMARY KEY,
+    called_at         timestamptz NOT NULL DEFAULT now(),
+    kind              text NOT NULL,           -- chat | embedding
+    model             text NOT NULL,           -- model name the API reports
+    deployment        text,
+    prompt_tokens     int,
+    completion_tokens int,
+    latency_ms        int,
+    cost_usd          numeric(12, 6),          -- NULL when the model has no price entry
+    prompt_version    text,
+    purpose           text                     -- chat | build_index | retrieval | ...
+);
+
 -- gold: what the chatbot's tools read
 CREATE OR REPLACE VIEW gold.league_table_current AS
 SELECT s.position, c.name AS club, s.club_id, s.played, s.won, s.drawn, s.lost,

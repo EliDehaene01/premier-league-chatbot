@@ -262,7 +262,7 @@ python -m backend.observability.freshness    # is the data up to date?
 python -m evals.feedback review              # thumbs-down answers to look at
 ```
 
-Evals need `pip install -e ".[eval]"` and exit non-zero below `evals/thresholds.yaml`. Latest full results: [docs/EVAL_RESULTS.md](docs/EVAL_RESULTS.md). The **Eval gate** workflow on GitHub runs the full set only when started by hand (Actions > Eval gate > Run workflow), because every run costs money.
+Evals need `pip install -e ".[eval]"` and exit non-zero below `evals/thresholds.yaml`. Latest full results: [docs/EVAL_RESULTS.md](docs/EVAL_RESULTS.md). The **Eval gate** workflow on GitHub runs the full set on every pull request that changes how the chatbot answers (about $0.90 a run). It skips draft pull requests, so work as a draft and mark it ready for review to run it once. It can also be started by hand (Actions > Eval gate > Run workflow).
 
 ## Project status
 

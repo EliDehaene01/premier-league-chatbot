@@ -11,10 +11,26 @@
 # and the full run costs about $0.90, capped at $1.50.
 name: Eval gate
 
-# Manual only (Eli, 2026-11-21): every run costs about $0.90 of Azure credit, and on PRs it
-# ran four times for one change. Start it from Actions > Eval gate > Run workflow, choosing
-# the branch, when a change to the answer path is ready.
+# Runs on pull requests that change how the chatbot answers (Eli, 2026-11-21, after prompt v4
+# passed). Every run costs about $0.90 of Azure credit, so it is guarded:
+# - only for the answer path (model calls, RAG, prompts, tools, chat loop, MCP server, evals),
+#   not for test-only or docs-only changes;
+# - never on draft pull requests: iterate as a draft, then "Ready for review" runs it once;
+# - a new push cancels the run still going for the previous one.
+# It can still be started by hand from Actions > Eval gate > Run workflow.
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "backend/llm/**"
+      - "backend/rag/**"
+      - "backend/prompts/**"
+      - "backend/tools/**"
+      - "backend/chat.py"
+      - "mcp_server/**"
+      - "evals/**"
+      - "!**/test_*.py"
+      - "!evals/results/**"
   workflow_dispatch:
 
 concurrency:
@@ -23,6 +39,7 @@ concurrency:
 
 jobs:
   evals:
+    if: github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 75
     services:
@@ -74,7 +91,9 @@ jobs:
         run: python -m evals.run --dataset chat_v1 --max-cost-usd 1.5 --report eval-report.md
       - name: Report
         if: always() && steps.keys.outputs.ok == 'true'
-        run: cat eval-report.md >> "$GITHUB_STEP_SUMMARY" || true
+        run: |
+          cat eval-report.md >> "$GITHUB_STEP_SUMMARY" || true
+          cat eval-report.md || true
       - uses: actions/upload-artifact@v4
         if: always() && steps.keys.outputs.ok == 'true'
         with:

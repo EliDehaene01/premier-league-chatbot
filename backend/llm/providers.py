@@ -9,6 +9,7 @@ import psycopg
 from openai import OpenAI
 
 from backend.config import Settings, settings
+from backend.observability import tracing
 from backend.observability.pricing import cost_usd
 
 
@@ -84,9 +85,18 @@ class AzureOpenAIProvider:
                 "INSERT INTO llm_calls (kind, model, deployment, prompt_tokens, "
                 "completion_tokens, latency_ms, cost_usd, prompt_version, purpose) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                (kind, model, deployment, prompt, completion,
-                 int((time.monotonic() - started) * 1000), cost, self.prompt_version, purpose),
-            )  # fmt: skip
+                (
+                    kind,
+                    model,
+                    deployment,
+                    prompt,
+                    completion,
+                    int((time.monotonic() - started) * 1000),
+                    cost,
+                    self.prompt_version,
+                    purpose,
+                ),
+            )
         return cost
 
     def chat(self, messages, tools=None, purpose="chat", response_format=None) -> ChatResult:
@@ -97,14 +107,18 @@ class AzureOpenAIProvider:
             kwargs["tools"] = tools
         if response_format:
             kwargs["response_format"] = response_format
-        resp = self.client.chat.completions.create(
-            model=self.chat_deployment, messages=messages, **kwargs
-        )
-        cost = self._record("chat", resp.model, self.chat_deployment, resp.usage, started, purpose)
-        msg = resp.choices[0].message
-        calls = [
-            ToolCall(c.id, c.function.name, c.function.arguments) for c in msg.tool_calls or []
-        ]
+        with self._generation(purpose, messages) as gen:
+            resp = self.client.chat.completions.create(
+                model=self.chat_deployment, messages=messages, **kwargs
+            )
+            cost = self._record(
+                "chat", resp.model, self.chat_deployment, resp.usage, started, purpose
+            )
+            msg = resp.choices[0].message
+            calls = [
+                ToolCall(c.id, c.function.name, c.function.arguments) for c in msg.tool_calls or []
+            ]
+            self._end(gen, resp.model, resp.usage, cost, msg.content, calls)
         return ChatResult(msg.content, calls, cost)
 
     def chat_stream(self, messages, tools=None, on_delta=None, purpose="chat") -> ChatResult:
@@ -119,6 +133,18 @@ class AzureOpenAIProvider:
             kwargs["tools"] = tools
         content: list[str] = []
         calls: dict[int, dict] = {}
+        model, usage = self.chat_deployment, None
+        with self._generation(purpose, messages) as gen:
+            result = self._stream(messages, kwargs, on_delta, content, calls)
+            model, usage = result
+            cost = self._record("chat", model, self.chat_deployment, usage, started, purpose)
+            tool_calls = [
+                ToolCall(c["id"], c["name"], c["arguments"]) for _, c in sorted(calls.items())
+            ]
+            self._end(gen, model, usage, cost, "".join(content) or None, tool_calls)
+        return ChatResult("".join(content) or None, tool_calls, cost)
+
+    def _stream(self, messages, kwargs, on_delta, content, calls):
         model, usage = self.chat_deployment, None
         for chunk in self.client.chat.completions.create(
             model=self.chat_deployment, messages=messages, **kwargs
@@ -138,18 +164,57 @@ class AzureOpenAIProvider:
                 if tc.function:
                     c["name"] += tc.function.name or ""
                     c["arguments"] += tc.function.arguments or ""
-        cost = self._record("chat", model, self.chat_deployment, usage, started, purpose)
-        tool_calls = [
-            ToolCall(c["id"], c["name"], c["arguments"]) for _, c in sorted(calls.items())
-        ]
-        return ChatResult("".join(content) or None, tool_calls, cost)
+        return model, usage
 
     def embed(self, texts, purpose="embedding") -> list[list[float]]:
         started = time.monotonic()
-        resp = self.client.embeddings.create(model=self.embedding_deployment, input=texts)
-        self._record("embedding", resp.model, self.embedding_deployment, resp.usage, started,
-                     purpose)  # fmt: skip
+        with tracing.observe(
+            f"embed:{self.purpose_prefix}{purpose}",
+            as_type="embedding",
+            model=self.embedding_deployment,
+            input={"texts": len(texts)},
+        ) as gen:
+            resp = self.client.embeddings.create(model=self.embedding_deployment, input=texts)
+            cost = self._record(
+                "embedding", resp.model, self.embedding_deployment, resp.usage, started, purpose
+            )
+            self._end(gen, resp.model, resp.usage, cost, None, [])
         return [d.embedding for d in sorted(resp.data, key=lambda d: d.index)]
+
+    # ---------- tracing: one generation per call, with model, tokens and cost
+
+    def _generation(self, purpose: str, messages: list[dict]):
+        return tracing.observe(
+            f"llm:{self.purpose_prefix}{purpose}",
+            as_type="generation",
+            model=self.chat_deployment,
+            input=messages,
+            metadata={
+                "purpose": self.purpose_prefix + purpose,
+                "prompt_version": self.prompt_version,
+            },
+        )
+
+    @staticmethod
+    def _end(gen, model, usage, cost, content, calls) -> None:
+        if not gen:
+            return
+        prompt = getattr(usage, "prompt_tokens", 0) or 0
+        completion = getattr(usage, "completion_tokens", 0) or 0
+        output = (
+            content
+            if not calls
+            else {
+                "content": content,
+                "tool_calls": [{"name": c.name, "arguments": c.arguments} for c in calls],
+            }
+        )
+        gen.update(
+            model=model,
+            output=output,
+            usage_details={"input": prompt, "output": completion},
+            cost_details={"total": cost} if cost is not None else None,
+        )
 
 
 def tool_call_message(content: str | None, calls: list[ToolCall]) -> dict:

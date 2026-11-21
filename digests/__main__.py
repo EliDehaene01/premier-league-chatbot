@@ -17,6 +17,7 @@ from pathlib import Path
 
 from backend.db import get_connection, init_db
 from backend.llm.providers import AzureOpenAIProvider
+from backend.observability import tracing
 from digests import site
 from digests.config import load_weights
 from digests.writer import DigestError, write_news, write_recap
@@ -61,42 +62,54 @@ def main(argv=None) -> int:
     init_db(conn)
     weights = load_weights()
     try:
-        if args.cmd == "recap":
-            d = write_recap(
-                conn,
-                AzureOpenAIProvider(conn, prompt_version="digest_recap_v1"),
-                args.matchweek,
-                cfg=weights["recap"],
-                store=not args.dry_run,
-            )
-            out = summary(d)
-        elif args.cmd == "news":
-            d = write_news(
-                conn,
-                AzureOpenAIProvider(conn, prompt_version="digest_news_v1"),
-                args.week_ending,
-                cfg=weights["news"],
-                store=not args.dry_run,
-            )
-            out = summary(d)
-        if args.cmd in ("recap", "news") and args.publish and not args.dry_run:
-            out["published"] = site.publish(site.render(conn), Path.cwd(), push=True)
-        elif args.cmd == "publish":
-            files = site.render(conn)
-            if args.out:
-                for path, content in files.items():
-                    (args.out / path).parent.mkdir(parents=True, exist_ok=True)
-                    (args.out / path).write_bytes(content)
-                out = {"written": len(files), "to": str(args.out)}
-            else:
-                out = site.publish(files, Path.cwd(), push=args.push)
+        with tracing.turn(f"digest:{args.cmd}", tags=["digest", args.cmd], input=vars_(args)):
+            out = _run(args, conn, weights)
     except DigestError as e:
         out = {"error": str(e)}
+    finally:
+        tracing.flush()
     text = json.dumps(out, indent=2, default=str)
     print(text)
     if getattr(args, "summary", None):
         args.summary.write_text(text, encoding="utf-8")
     return 1 if "error" in out else 0
+
+
+def vars_(args) -> dict:
+    return {k: str(v) for k, v in vars(args).items() if v is not None}
+
+
+def _run(args, conn, weights) -> dict:
+    if args.cmd == "recap":
+        d = write_recap(
+            conn,
+            AzureOpenAIProvider(conn, prompt_version="digest_recap_v1"),
+            args.matchweek,
+            cfg=weights["recap"],
+            store=not args.dry_run,
+        )
+        out = summary(d)
+    elif args.cmd == "news":
+        d = write_news(
+            conn,
+            AzureOpenAIProvider(conn, prompt_version="digest_news_v1"),
+            args.week_ending,
+            cfg=weights["news"],
+            store=not args.dry_run,
+        )
+        out = summary(d)
+    if args.cmd in ("recap", "news") and args.publish and not args.dry_run:
+        out["published"] = site.publish(site.render(conn), Path.cwd(), push=True)
+    elif args.cmd == "publish":
+        files = site.render(conn)
+        if args.out:
+            for path, content in files.items():
+                (args.out / path).parent.mkdir(parents=True, exist_ok=True)
+                (args.out / path).write_bytes(content)
+            out = {"written": len(files), "to": str(args.out)}
+        else:
+            out = site.publish(files, Path.cwd(), push=args.push)
+    return out
 
 
 if __name__ == "__main__":

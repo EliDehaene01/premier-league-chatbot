@@ -2,11 +2,13 @@
 
 import argparse
 import sys
+import uuid
 
 from backend.config import settings
 from backend.db import get_connection, init_db
 from backend.llm.client import chat
 from backend.llm.providers import AzureOpenAIProvider
+from backend.observability import tracing
 from backend.tools import ToolContext
 from mcp_server.client import from_settings
 
@@ -35,6 +37,14 @@ def main(argv: list[str] | None = None) -> int:
     provider = AzureOpenAIProvider(conn)
     tools = from_settings()  # the Premier League MCP server, unless TOOL_TRANSPORT=direct
     messages: list[dict] = []
+    session = f"cli-{uuid.uuid4()}"
+    try:
+        return _loop(args, conn, provider, tools, messages, session)
+    finally:
+        tracing.flush()
+
+
+def _loop(args, conn, provider, tools, messages, session) -> int:
     while True:
         if args.ask:
             question = args.ask
@@ -47,7 +57,9 @@ def main(argv: list[str] | None = None) -> int:
             if question in ("", "exit", "quit"):
                 return 0
         messages.append({"role": "user", "content": question})
-        turn = chat(messages, ToolContext(conn, provider, tools=tools))
+        turn = chat(
+            messages, ToolContext(conn, provider, tools=tools), session_id=session, tags=["cli"]
+        )
         messages = turn.messages
         show(turn)
         if args.ask:

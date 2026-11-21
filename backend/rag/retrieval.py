@@ -7,6 +7,7 @@ from psycopg.rows import dict_row
 
 from backend.config import settings
 from backend.llm.providers import LLMProvider
+from backend.observability import tracing
 from backend.rag.build_index import to_vector
 
 CANDIDATES = 20  # per retriever
@@ -61,6 +62,45 @@ def search(
     half_life_days: float | None = None,
     now: datetime | None = None,
 ) -> list[dict]:
+    filters = {
+        "k": k,
+        "club_ids": club_ids,
+        "date_from": date_from,
+        "date_to": date_to,
+        "exclude_fantasy": exclude_fantasy,
+    }
+    with tracing.observe(
+        "retrieval", as_type="retriever", input={"query": query, **filters}
+    ) as span:
+        results = _search(
+            conn,
+            provider,
+            query,
+            k,
+            club_ids,
+            date_from,
+            date_to,
+            exclude_fantasy,
+            half_life_days,
+            now,
+        )
+        span.update(
+            output=[
+                {
+                    "article_id": r["article_id"],
+                    "title": r["title"],
+                    "date": r["date"],
+                    "score": r["scores"]["final"],
+                }
+                for r in results
+            ]
+        )
+    return results
+
+
+def _search(
+    conn, provider, query, k, club_ids, date_from, date_to, exclude_fantasy, half_life_days, now
+) -> list[dict]:
     half_life = half_life_days or settings.recency_half_life_days
     now = now or datetime.now(UTC)
     where, params = _filters(club_ids, date_from, date_to, exclude_fantasy)
@@ -96,15 +136,21 @@ def search(
     for row in rows:
         key = (row["content_id"], row["chunk_index"])
         weight = recency_weight(row["published_at"], now, half_life)
-        results.append({
-            "article_id": row["content_id"],
-            "title": row["title"],
-            "date": row["published_at"].date().isoformat() if row["published_at"] else None,
-            "url": row["canonical_url"],
-            "text": row["text"],
-            "scores": {"rrf": round(fused[key], 5), "recency": round(weight, 3),
-                       "final": round(fused[key] * weight, 5),
-                       "vector_rank": vec_rank.get(key), "text_rank": text_rank.get(key)},
-        })  # fmt: skip
+        results.append(
+            {
+                "article_id": row["content_id"],
+                "title": row["title"],
+                "date": row["published_at"].date().isoformat() if row["published_at"] else None,
+                "url": row["canonical_url"],
+                "text": row["text"],
+                "scores": {
+                    "rrf": round(fused[key], 5),
+                    "recency": round(weight, 3),
+                    "final": round(fused[key] * weight, 5),
+                    "vector_rank": vec_rank.get(key),
+                    "text_rank": text_rank.get(key),
+                },
+            }
+        )
     results.sort(key=lambda r: r["scores"]["final"], reverse=True)
     return results[:k]

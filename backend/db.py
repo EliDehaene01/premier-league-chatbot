@@ -216,6 +216,8 @@ CREATE TABLE IF NOT EXISTS public.chat_turns (
     latency_ms      int,
     error           text
 );
+-- Phase 6: the Langfuse trace of the turn, so feedback can be attached to it as a score
+ALTER TABLE public.chat_turns ADD COLUMN IF NOT EXISTS trace_id text;
 
 CREATE TABLE IF NOT EXISTS public.feedback (
     id              bigserial PRIMARY KEY,

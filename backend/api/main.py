@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from backend.db import get_connection, init_db
 from backend.llm.client import chat
 from backend.llm.providers import AzureOpenAIProvider, LLMProvider
+from backend.observability import tracing
 from backend.tools import ToolContext
 
 MAX_MESSAGE_CHARS = 1000
@@ -56,11 +57,20 @@ def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
 
 
-WIDGET_TOOLS = {"get_league_table": "table", "get_fixtures": "matches", "get_results": "matches",
-                "get_head_to_head": "matches", "get_match_lineup": "lineup",
-                "get_player_stats": "player", "get_top_scorers": "leaders"}  # fmt: skip
-MATCH_TITLES = {"get_fixtures": "Fixtures", "get_results": "Results",
-                "get_head_to_head": "Head to head"}  # fmt: skip
+WIDGET_TOOLS = {
+    "get_league_table": "table",
+    "get_fixtures": "matches",
+    "get_results": "matches",
+    "get_head_to_head": "matches",
+    "get_match_lineup": "lineup",
+    "get_player_stats": "player",
+    "get_top_scorers": "leaders",
+}
+MATCH_TITLES = {
+    "get_fixtures": "Fixtures",
+    "get_results": "Results",
+    "get_head_to_head": "Head to head",
+}
 
 
 def widgets(tool_results: list[dict]) -> list[dict]:
@@ -71,14 +81,17 @@ def widgets(tool_results: list[dict]) -> list[dict]:
         if not isinstance(output, dict) or "error" in output:
             continue
         if r["name"] == "compare_players":
-            out += [{"type": "player", "data": p} for p in output.get("players", [])
-                    if "error" not in p]  # fmt: skip
+            out += [
+                {"type": "player", "data": p} for p in output.get("players", []) if "error" not in p
+            ]
         elif kind == "matches":
-            matches = next((output[k] for k in ("fixtures", "results", "matches") if k in output),
-                           [])  # fmt: skip
+            matches = next(
+                (output[k] for k in ("fixtures", "results", "matches") if k in output), []
+            )
             if matches:
-                out.append({"type": kind, "data": {"title": MATCH_TITLES[r["name"]],
-                                                   "matches": matches}})  # fmt: skip
+                out.append(
+                    {"type": kind, "data": {"title": MATCH_TITLES[r["name"]], "matches": matches}}
+                )
         elif kind == "lineup" and not output.get("lineup_announced"):
             continue
         elif kind:
@@ -133,11 +146,14 @@ def create_app(
         from mcp_server.client import from_settings
 
         tools = from_settings()
-    make_provider = make_provider or (lambda conn: AzureOpenAIProvider(
-        conn, purpose_prefix="api:"))  # fmt: skip
+    make_provider = make_provider or (lambda conn: AzureOpenAIProvider(conn, purpose_prefix="api:"))
     app = FastAPI(title="Premier League chatbot")
-    app.add_middleware(CORSMiddleware, allow_origins=DEV_ORIGINS, allow_methods=["GET", "POST"],
-                       allow_headers=["Content-Type"])  # fmt: skip
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=DEV_ORIGINS,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+    )
     hits: dict[str, deque] = defaultdict(deque)
     hits_lock = threading.Lock()
 
@@ -174,27 +190,56 @@ def create_app(
             try:
                 provider = make_provider(conn)
                 ctx = ToolContext(conn, provider, tools=tools)
-                turn = chat([m.model_dump() for m in req.messages], ctx,
-                            emit=lambda e, d: events.put((e, d)))  # fmt: skip
+                turn = chat(
+                    [m.model_dump() for m in req.messages],
+                    ctx,
+                    emit=lambda e, d: events.put((e, d)),
+                    session_id=req.conversation_id,
+                    tags=["api"],
+                )
                 latency = int((time.monotonic() - started) * 1000)
                 usage = getattr(provider, "usage", None) or {}
                 conn.execute(
                     "INSERT INTO chat_turns (turn_id, conversation_id, question, answer, tools, "
-                    "sources, prompt_version, cost_usd, latency_ms) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                    (turn_id, req.conversation_id, last.content, turn.answer,
-                     Jsonb(turn.tool_calls), Jsonb(turn.sources), turn.prompt_version,
-                     turn.cost_usd, latency),
-                )  # fmt: skip
-                events.put(("message", {"turn_id": turn_id, "answer": turn.answer,
-                                        "sources": turn.sources,
-                                        "widgets": widgets(turn.tool_results),
-                                        "prompt_version": turn.prompt_version}))  # fmt: skip
+                    "sources, prompt_version, cost_usd, latency_ms, trace_id) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (
+                        turn_id,
+                        req.conversation_id,
+                        last.content,
+                        turn.answer,
+                        Jsonb(turn.tool_calls),
+                        Jsonb(turn.sources),
+                        turn.prompt_version,
+                        turn.cost_usd,
+                        latency,
+                        turn.trace_id,
+                    ),
+                )
+                events.put(
+                    (
+                        "message",
+                        {
+                            "turn_id": turn_id,
+                            "answer": turn.answer,
+                            "sources": turn.sources,
+                            "widgets": widgets(turn.tool_results),
+                            "prompt_version": turn.prompt_version,
+                        },
+                    )
+                )
                 tokens = {k: usage.get(k) for k in ("prompt_tokens", "completion_tokens")}
                 events.put(("usage", {**tokens, "cost_usd": turn.cost_usd, "latency_ms": latency}))
             except Exception as e:  # the stream must end with something the UI can show
-                events.put(("error", {"message": "Something went wrong answering that.",
-                                      "detail": type(e).__name__}))  # fmt: skip
+                events.put(
+                    (
+                        "error",
+                        {
+                            "message": "Something went wrong answering that.",
+                            "detail": type(e).__name__,
+                        },
+                    )
+                )
             finally:
                 conn.close()
                 events.put(None)
@@ -206,8 +251,9 @@ def create_app(
             while (item := events.get()) is not None:
                 yield sse(*item)
 
-        return StreamingResponse(stream(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-cache"})  # fmt: skip
+        return StreamingResponse(
+            stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"}
+        )
 
     @app.post("/api/feedback")
     def post_feedback(req: FeedbackRequest) -> dict:
@@ -216,12 +262,16 @@ def create_app(
                 "INSERT INTO feedback (turn_id, conversation_id, rating, comment, question, "
                 "answer, tools, prompt_version) SELECT turn_id, conversation_id, %s, %s, "
                 "question, answer, tools, prompt_version FROM chat_turns WHERE turn_id = %s "
-                "RETURNING id",
-                (req.rating, req.comment, req.turn_id),
+                "RETURNING id, (SELECT trace_id FROM chat_turns WHERE turn_id = %s)",
+                (req.rating, req.comment, req.turn_id, req.turn_id),
             ).fetchone()
         if not row:
             raise HTTPException(404, "unknown turn_id")
-        return {"ok": True, "id": row[0]}
+        # the same rating on the turn's trace, so Langfuse shows it next to the spans
+        scored = tracing.score(
+            row[1], "user_feedback", 1.0 if req.rating == "up" else 0.0, comment=req.comment
+        )
+        return {"ok": True, "id": row[0], "traced": scored}
 
     @app.get("/api/health")
     def health() -> dict:
@@ -236,9 +286,14 @@ def create_app(
         except psycopg.Error:
             return {"status": "down", "db": False}
         stale = article is None or (datetime.now(UTC) - article).days > 7
-        return {"status": "degraded" if stale else "ok", "db": True,
-                "latest_article": article, "latest_finished_match": match,
-                "table_after_matchweek": matchweek, "indexed_chunks": chunks}  # fmt: skip
+        return {
+            "status": "degraded" if stale else "ok",
+            "db": True,
+            "latest_article": article,
+            "latest_finished_match": match,
+            "table_after_matchweek": matchweek,
+            "indexed_chunks": chunks,
+        }
 
     @app.get("/api/digests/latest")
     def latest_digests() -> dict:

@@ -16,6 +16,7 @@ from mcp_types import Tool as MCPTool
 
 from backend.db import get_connection
 from backend.llm.providers import AzureOpenAIProvider
+from backend.observability import tracing
 from backend.tools import TOOL_SPECS, ToolContext, get_league_table, get_weekly_digest, run_tool
 
 ContextFactory = Callable[[], AbstractContextManager[ToolContext]]
@@ -37,6 +38,22 @@ def default_context() -> Iterator[ToolContext]:
         conn.close()
 
 
+def _meta(context) -> dict:
+    try:
+        meta = context.request_context.meta
+    except (AttributeError, ValueError):
+        return {}
+    if meta is None:
+        return {}
+    return dict(meta) if isinstance(meta, dict) else (getattr(meta, "model_extra", None) or {})
+
+
+def _level(output) -> dict:
+    if isinstance(output, dict) and "error" in output:
+        return {"level": "ERROR", "status_message": str(output["error"])[:200]}
+    return {}
+
+
 class PremierLeagueServer(MCPServer):
     def __init__(self, context: ContextFactory = default_context):
         super().__init__("premier-league", instructions=INSTRUCTIONS, version="0.5.0")
@@ -52,12 +69,22 @@ class PremierLeagueServer(MCPServer):
         ]
 
     async def call_tool(self, name, arguments, context=None) -> CallToolResult:
+        parent = tracing.parse_traceparent(_meta(context).get("traceparent"))
+
         def run() -> dict:
-            with self.context() as ctx:
-                try:
-                    return run_tool(ctx, name, arguments or {})
-                except TypeError as e:  # unexpected or missing arguments
-                    return {"error": f"bad arguments for {name}: {e}"}
+            # joins the caller's trace when it sent one; a client like Claude Desktop gets its own
+            with tracing.observe(
+                f"mcp:{name}", as_type="tool", input=arguments, trace_context=parent
+            ) as span:
+                with self.context() as ctx:
+                    try:
+                        output = run_tool(ctx, name, arguments or {})
+                    except TypeError as e:  # unexpected or missing arguments
+                        output = {"error": f"bad arguments for {name}: {e}"}
+                span.update(output=output, **_level(output))
+            if parent is None:
+                tracing.flush()
+            return output
 
         output = await anyio.to_thread.run_sync(run)
         return CallToolResult(

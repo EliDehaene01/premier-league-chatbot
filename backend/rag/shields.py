@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from backend.config import Settings, settings
+from backend.observability import tracing
 
 log = logging.getLogger(__name__)
 API_VERSION = "2024-09-01"
@@ -40,6 +41,23 @@ def _batches(chunks: list[dict]):
 def shield(chunks: list[dict], query: str, cfg: Settings = settings, http=None) -> ShieldResult:
     if not chunks:
         return ShieldResult()
+    with tracing.observe(
+        "prompt_shields", as_type="guardrail", input={"chunks": len(chunks)}
+    ) as span:
+        result = _shield(chunks, query, cfg, http)
+        level = {"level": "WARNING"} if result.error or result.flagged else {}
+        span.update(
+            output={
+                "safe": len(result.safe),
+                "flagged": len(result.flagged),
+                "error": result.error,
+            },
+            **level,
+        )
+    return result
+
+
+def _shield(chunks: list[dict], query: str, cfg: Settings, http) -> ShieldResult:
     url = cfg.content_safety_endpoint.rstrip("/") + "/contentsafety/text:shieldPrompt"
     headers = {"Ocp-Apim-Subscription-Key": cfg.content_safety_api_key}
     http = http or httpx.Client(timeout=15)

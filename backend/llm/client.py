@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from backend.config import settings
 from backend.llm import citations
 from backend.llm.providers import tool_call_message, tool_result_message
+from backend.observability import tracing
 from backend.prompts import load_prompt
 from backend.tools import TOOL_SPECS, ToolContext, run_tool
 
@@ -28,6 +29,7 @@ class ChatTurn:
     raw_answer: str = ""
     cost_usd: float | None = 0.0
     prompt_version: str = ""
+    trace_id: str | None = None  # the Langfuse trace of this turn, when tracing is on
 
 
 def system_prompt(ctx: ToolContext, version: str) -> str:
@@ -49,8 +51,37 @@ def chat(
     prompt_version: str | None = None,
     max_rounds: int = MAX_TOOL_ROUNDS,
     emit: Emit | None = None,
+    session_id: str | None = None,
+    tags: list[str] | None = None,
 ) -> ChatTurn:
+    """One turn: the model calls tools until it can answer, then citations are checked.
+
+    Traced as one Langfuse trace (session = the conversation), with a generation per model call
+    and a tool span per tool call; the trace id comes back on the turn for feedback scores.
+    """
     version = prompt_version or settings.prompt_version
+    question = next((m.get("content") for m in reversed(messages) if m.get("role") == "user"), "")
+    transport = "direct" if ctx.tools is None else "mcp"
+    with tracing.turn(
+        "chat_turn",
+        session_id=session_id,
+        tags=tags,
+        input=question,
+        metadata={"prompt_version": version, "transport": transport},
+    ) as root:
+        turn = _chat(messages, ctx, version, max_rounds, emit, transport)
+        root.update(
+            output={
+                "answer": turn.answer,
+                "sources": turn.sources,
+                "dropped_markers": turn.dropped_markers,
+            }
+        )
+        turn.trace_id = root.trace_id
+    return turn
+
+
+def _chat(messages, ctx, version, max_rounds, emit, transport) -> ChatTurn:
     if hasattr(ctx.provider, "prompt_version"):
         ctx.provider.prompt_version = version  # recorded on every llm_calls row
     system = {"role": "system", "content": system_prompt(ctx, version)}
@@ -80,14 +111,27 @@ def chat(
         for call in result.tool_calls:
             record = {"name": call.name, "arguments": call.arguments}
             if emit:
-                emit("tool_call", {"name": call.name, "arguments": call.arguments,
-                                   "status": "started"})  # fmt: skip
-            try:
-                args = json.loads(call.arguments or "{}")
-                output = (ctx.tools.call(call.name, args) if ctx.tools
-                          else run_tool(ctx, call.name, args))  # fmt: skip
-            except Exception as e:  # the model sees the error and can recover or explain
-                args, output = {}, {"error": f"{type(e).__name__}: {e}"}
+                emit(
+                    "tool_call",
+                    {"name": call.name, "arguments": call.arguments, "status": "started"},
+                )
+            with tracing.observe(
+                f"tool:{call.name}",
+                as_type="tool",
+                input=call.arguments,
+                metadata={"transport": transport},
+            ) as span:
+                try:
+                    args = json.loads(call.arguments or "{}")
+                    output = (
+                        ctx.tools.call(call.name, args)
+                        if ctx.tools
+                        else run_tool(ctx, call.name, args)
+                    )
+                except Exception as e:  # the model sees the error and can recover or explain
+                    args, output = {}, {"error": f"{type(e).__name__}: {e}"}
+                failed = isinstance(output, dict) and "error" in output
+                span.update(output=output, **({"level": "ERROR"} if failed else {}))
             if isinstance(output, dict) and "error" in output:
                 record["error"] = output["error"]
             turn.tool_calls.append(record)

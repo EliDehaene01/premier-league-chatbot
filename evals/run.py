@@ -24,6 +24,7 @@ from backend.config import settings
 from backend.db import get_connection
 from backend.llm.client import chat, system_prompt
 from backend.llm.providers import AzureOpenAIProvider
+from backend.observability import tracing
 from backend.rag import shields
 from backend.rag.retrieval import search
 from backend.tools import ToolContext
@@ -66,7 +67,7 @@ def golden_rows(conn, case: dict, now: datetime) -> list[tuple] | None:
     return [tuple(_plain(v) for v in r) for r in rows]
 
 
-def run_case(case, now, conn, provider, judge, use_judges=True) -> dict:
+def run_case(case, now, conn, provider, judge, use_judges=True, run_tags=()) -> dict:
     ctx = ToolContext(conn, provider, now=now)
     inject = case.get("inject_chunks") or []
     if inject:  # a planted chunk goes through the real Prompt Shields like any retrieved text
@@ -75,11 +76,18 @@ def run_case(case, now, conn, provider, judge, use_judges=True) -> dict:
     started = time.monotonic()
     # through the MCP server, as users get it (TOOL_TRANSPORT=direct skips the protocol);
     # the in-process server runs the tools with this case's context: its date, its shield
-    tools = None if settings.tool_transport == "direct" else McpTools(
-        build_server(lambda: nullcontext(ctx)))  # fmt: skip
+    tools = (
+        None
+        if settings.tool_transport == "direct"
+        else McpTools(build_server(lambda: nullcontext(ctx)))
+    )
     try:
-        turn = chat([*case.get("history", []), {"role": "user", "content": question}],
-                    replace(ctx, tools=tools))  # fmt: skip
+        turn = chat(
+            [*case.get("history", []), {"role": "user", "content": question}],
+            replace(ctx, tools=tools),
+            session_id=case["id"],
+            tags=["eval", case["category"], *run_tags],
+        )
     finally:
         if tools:
             tools.close()
@@ -111,36 +119,69 @@ def run_case(case, now, conn, provider, judge, use_judges=True) -> dict:
         elif name == "guardrail":
             checks[name] = judges.guardrail(judge, case, t)
     applicable = [c.passed for c in checks.values() if c.passed is not None]
+    for name, check in checks.items():  # each check as a score on the case's trace
+        if check.passed is not None:
+            tracing.score(turn.trace_id, f"eval:{name}", float(check.passed))
     u, j = provider.usage, judge.usage
     if judge_cost is not None:
         judge_cost = None if j["cost_usd"] is None else judge_cost + j["cost_usd"]
     return {
-        "id": case["id"], "category": case["category"], "question": question,
-        "answer": turn.answer, "sources": turn.sources, "dropped_markers": turn.dropped_markers,
+        "id": case["id"],
+        "category": case["category"],
+        "question": question,
+        "answer": turn.answer,
+        "sources": turn.sources,
+        "dropped_markers": turn.dropped_markers,
         "tool_calls": [{"name": c["name"], "arguments": c["arguments"]} for c in t["calls"]],
         "checks": {k: v.as_dict() for k, v in checks.items()},
         "passed": bool(applicable) and all(applicable),
         "latency_ms": latency_ms,
         "tokens": {"prompt": u["prompt_tokens"], "completion": u["completion_tokens"]},
-        "cost_usd": u["cost_usd"], "judge_cost_usd": judge_cost,
-    }  # fmt: skip
+        "cost_usd": u["cost_usd"],
+        "judge_cost_usd": judge_cost,
+    }
 
 
 def _error_result(case: dict, e: Exception) -> dict:
-    return {"id": case["id"], "category": case["category"], "question": case["question"],
-            "answer": "", "tool_calls": [], "checks": {}, "passed": False, "latency_ms": None,
-            "tokens": {"prompt": 0, "completion": 0}, "cost_usd": 0.0, "judge_cost_usd": 0.0,
-            "error": f"{type(e).__name__}: {e}"}  # fmt: skip
+    return {
+        "id": case["id"],
+        "category": case["category"],
+        "question": case["question"],
+        "answer": "",
+        "tool_calls": [],
+        "checks": {},
+        "passed": False,
+        "latency_ms": None,
+        "tokens": {"prompt": 0, "completion": 0},
+        "cost_usd": 0.0,
+        "judge_cost_usd": 0.0,
+        "error": f"{type(e).__name__}: {e}",
+    }
 
 
-def run(cases, now, max_cost=3.0, concurrency=2, use_judges=True, make_conn=get_connection,
-        make_provider=None, make_judge=None) -> tuple[list[dict], bool]:  # fmt: skip
+def run(
+    cases,
+    now,
+    max_cost=3.0,
+    concurrency=2,
+    use_judges=True,
+    make_conn=get_connection,
+    make_provider=None,
+    make_judge=None,
+    run_tags=(),
+) -> tuple[list[dict], bool]:
     """Returns (results, stopped_by_cost_cap). Cases start only while spend is under max_cost."""
-    make_provider = make_provider or (lambda conn: AzureOpenAIProvider(
-        conn, purpose_prefix="eval:"))  # fmt: skip
-    make_judge = make_judge or (lambda conn: AzureOpenAIProvider(
-        conn, chat_deployment=settings.eval_judge_deployment or None, purpose_prefix="eval:",
-        max_completion_tokens=2000))  # fmt: skip
+    make_provider = make_provider or (
+        lambda conn: AzureOpenAIProvider(conn, purpose_prefix="eval:")
+    )
+    make_judge = make_judge or (
+        lambda conn: AzureOpenAIProvider(
+            conn,
+            chat_deployment=settings.eval_judge_deployment or None,
+            purpose_prefix="eval:",
+            max_completion_tokens=2000,
+        )
+    )
     lock = threading.Lock()
     spent = {"usd": 0.0, "capped": False}
 
@@ -151,7 +192,9 @@ def run(cases, now, max_cost=3.0, concurrency=2, use_judges=True, make_conn=get_
                 return None
         conn = make_conn()
         try:
-            result = run_case(case, now, conn, make_provider(conn), make_judge(conn), use_judges)
+            result = run_case(
+                case, now, conn, make_provider(conn), make_judge(conn), use_judges, run_tags
+            )
         except Exception as e:  # one broken case must not stop the run
             result = _error_result(case, e)
         finally:
@@ -188,21 +231,32 @@ def summarize(results: list[dict]) -> dict:
     return {
         "cases": len(results),
         "pass_rate": round(sum(r["passed"] for r in results) / len(results), 3) if results else 0,
-        "categories": {k: {"n": len(v), "pass_rate": round(sum(v) / len(v), 3)}
-                       for k, v in sorted(by_cat.items())},
-        "evaluators": {k: {"n": len(v),
-                           "pass_rate": round(sum(c["passed"] for c in v) / len(v), 3),
-                           "mean_score": round(statistics.mean(c["score"] or 0 for c in v), 3)}
-                       for k, v in sorted(by_eval.items())},
-        "retrieval": {"hit_at_5": round(sum(c["passed"] for c in retrieval) / len(retrieval), 3),
-                      "mrr": round(statistics.mean(c["score"] for c in retrieval), 3)}
-        if retrieval else None,
+        "categories": {
+            k: {"n": len(v), "pass_rate": round(sum(v) / len(v), 3)}
+            for k, v in sorted(by_cat.items())
+        },
+        "evaluators": {
+            k: {
+                "n": len(v),
+                "pass_rate": round(sum(c["passed"] for c in v) / len(v), 3),
+                "mean_score": round(statistics.mean(c["score"] or 0 for c in v), 3),
+            }
+            for k, v in sorted(by_eval.items())
+        },
+        "retrieval": {
+            "hit_at_5": round(sum(c["passed"] for c in retrieval) / len(retrieval), 3),
+            "mrr": round(statistics.mean(c["score"] for c in retrieval), 3),
+        }
+        if retrieval
+        else None,
         "cost_usd": None if None in costs else round(sum(costs), 4),
         "judge_cost_usd": None if None in judge_costs else round(sum(judge_costs), 4),
-        "latency_ms": {"p50": _pct([r["latency_ms"] for r in results], 0.5),
-                       "p95": _pct([r["latency_ms"] for r in results], 0.95)},
+        "latency_ms": {
+            "p50": _pct([r["latency_ms"] for r in results], 0.5),
+            "p95": _pct([r["latency_ms"] for r in results], 0.95),
+        },
         "errors": sum("error" in r for r in results),
-    }  # fmt: skip
+    }
 
 
 def below_thresholds(summary: dict, thresholds: dict) -> list[str]:
@@ -232,9 +286,14 @@ def _fmt(x):
 def compare(a: dict, b: dict) -> str:
     """Markdown diff of two result files: b relative to a."""
     sa, sb = a["summary"], b["summary"]
-    lines = [f"Comparing `{b['meta']['file']}` against `{a['meta']['file']}`.", "",
-             f"Overall pass rate: {sa['pass_rate']:.0%} -> {sb['pass_rate']:.0%}", "",
-             "| Category | Before | After | Change |", "|---|---|---|---|"]  # fmt: skip
+    lines = [
+        f"Comparing `{b['meta']['file']}` against `{a['meta']['file']}`.",
+        "",
+        f"Overall pass rate: {sa['pass_rate']:.0%} -> {sb['pass_rate']:.0%}",
+        "",
+        "| Category | Before | After | Change |",
+        "|---|---|---|---|",
+    ]
     for cat in sorted(set(sa["categories"]) | set(sb["categories"])):
         x = sa["categories"].get(cat, {}).get("pass_rate")
         y = sb["categories"].get(cat, {}).get("pass_rate")
@@ -249,8 +308,12 @@ def compare(a: dict, b: dict) -> str:
     after = {r["id"]: r["passed"] for r in b["results"]}
     fixed = sorted(i for i in after if after[i] and before.get(i) is False)
     broke = sorted(i for i in after if not after[i] and before.get(i) is True)
-    lines += ["", f"Now passing ({len(fixed)}): {', '.join(fixed) or 'none'}", "",
-              f"Newly failing ({len(broke)}): {', '.join(broke) or 'none'}"]  # fmt: skip
+    lines += [
+        "",
+        f"Now passing ({len(fixed)}): {', '.join(fixed) or 'none'}",
+        "",
+        f"Newly failing ({len(broke)}): {', '.join(broke) or 'none'}",
+    ]
     return "\n".join(lines)
 
 
@@ -260,33 +323,56 @@ def report(meta, summary, results, fails, comparison=None) -> str:
     verdict = "all met." if not fails else "**below threshold:** " + "; ".join(fails)
     capped = " Stopped early by the cost cap." if meta["capped"] else ""
     out = [
-        "# Eval results", "",
+        "# Eval results",
+        "",
         f"Dataset `{meta['dataset']}`{subset}, prompt `{meta['prompt_version']}`, chat model "
         f"`{meta['chat_deployment']}`, judge `{meta['judge_deployment']}`. Run {meta['run_at']}, "
-        f"eval date {meta['eval_date']}. Raw results: `{meta['file']}` (not committed).", "",
-        f"**{s['cases']} cases, {s['pass_rate']:.0%} passed.** Thresholds: {verdict}", "",
+        f"eval date {meta['eval_date']}. Raw results: `{meta['file']}` (not committed).",
+        "",
+        f"**{s['cases']} cases, {s['pass_rate']:.0%} passed.** Thresholds: {verdict}",
+        "",
         f"Cost: chat ${s['cost_usd']}, judges ${s['judge_cost_usd']}. Latency per case: "
         f"p50 {s['latency_ms']['p50']} ms, p95 {s['latency_ms']['p95']} ms. "
         f"Errors: {s['errors']}.{capped}",
-        "", "## Per category", "", "| Category | Cases | Pass rate |", "|---|---|---|",
-    ]  # fmt: skip
+        "",
+        "## Per category",
+        "",
+        "| Category | Cases | Pass rate |",
+        "|---|---|---|",
+    ]
     out += [f"| {k} | {v['n']} | {v['pass_rate']:.0%} |" for k, v in s["categories"].items()]
-    out += ["", "## Per evaluator", "", "| Evaluator | Applicable | Pass rate | Mean score |",
-            "|---|---|---|---|"]  # fmt: skip
-    out += [f"| {k} | {v['n']} | {v['pass_rate']:.0%} | {v['mean_score']:.2f} |"
-            for k, v in s["evaluators"].items()]  # fmt: skip
+    out += [
+        "",
+        "## Per evaluator",
+        "",
+        "| Evaluator | Applicable | Pass rate | Mean score |",
+        "|---|---|---|---|",
+    ]
+    out += [
+        f"| {k} | {v['n']} | {v['pass_rate']:.0%} | {v['mean_score']:.2f} |"
+        for k, v in s["evaluators"].items()
+    ]
     if s["retrieval"]:
-        out += ["", f"Retrieval over the news cases: hit@5 {s['retrieval']['hit_at_5']:.2f}, "
-                    f"MRR {s['retrieval']['mrr']:.2f}."]  # fmt: skip
+        out += [
+            "",
+            f"Retrieval over the news cases: hit@5 {s['retrieval']['hit_at_5']:.2f}, "
+            f"MRR {s['retrieval']['mrr']:.2f}.",
+        ]
     failed = sorted(
         (r for r in results if not r["passed"]),
         key=lambda r: -sum(c["passed"] is False for c in r["checks"].values()),
     )
-    out += ["", "## Worst cases", "", "| Case | Question | Answer (start) | Failing checks |",
-            "|---|---|---|---|"]  # fmt: skip
+    out += [
+        "",
+        "## Worst cases",
+        "",
+        "| Case | Question | Answer (start) | Failing checks |",
+        "|---|---|---|---|",
+    ]
     for r in failed[:10]:
-        bad = "; ".join(f"**{k}**: {c['detail'][:140]}" for k, c in r["checks"].items()
-                        if c["passed"] is False) or r.get("error", "")  # fmt: skip
+        bad = "; ".join(
+            f"**{k}**: {c['detail'][:140]}" for k, c in r["checks"].items() if c["passed"] is False
+        ) or r.get("error", "")
         answer = r["answer"][:160].replace("\n", " ").replace("|", "/")
         out.append(f"| {r['id']} | {r['question']} | {answer} | {bad.replace('|', '/')} |")
     if comparison:
@@ -317,23 +403,35 @@ def main(argv=None) -> int:
 
     now = datetime.fromisoformat(args.eval_date) if args.eval_date else datetime.now(UTC)
     cases = load_cases(args.dataset, args.subset, args.category)
-    results, capped = run(cases, now, args.max_cost_usd, args.concurrency, not args.no_judges)
+    settings.trace_environment = "eval"  # eval traces stay apart from real chats in Langfuse
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    tags = (f"run:{stamp}", f"dataset:{args.dataset}", f"prompt:{settings.prompt_version}")
+    try:
+        results, capped = run(
+            cases, now, args.max_cost_usd, args.concurrency, not args.no_judges, run_tags=tags
+        )
+    finally:
+        tracing.flush()
     summary = summarize(results)
     thresholds = yaml.safe_load(THRESHOLDS.read_text()) if THRESHOLDS.exists() else {}
     thresholds = thresholds or {}
     if args.subset or args.category:  # too few cases per category for category minimums
         thresholds = {k: v for k, v in thresholds.items() if k != "categories"}
     fails = below_thresholds(summary, thresholds)
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     part = f"_{args.subset or args.category}" if args.subset or args.category else ""
     RESULTS.mkdir(exist_ok=True)
     out_file = RESULTS / f"{stamp}_{args.dataset}{part}_{settings.prompt_version}.json"
-    meta = {"dataset": args.dataset, "subset": args.subset or args.category,
-            "prompt_version": settings.prompt_version, "run_at": stamp,
-            "eval_date": now.isoformat(), "chat_deployment": settings.azure_openai_chat_deployment,
-            "judge_deployment": settings.eval_judge_deployment
-            or settings.azure_openai_chat_deployment,
-            "file": f"evals/results/{out_file.name}", "capped": capped}  # fmt: skip
+    meta = {
+        "dataset": args.dataset,
+        "subset": args.subset or args.category,
+        "prompt_version": settings.prompt_version,
+        "run_at": stamp,
+        "eval_date": now.isoformat(),
+        "chat_deployment": settings.azure_openai_chat_deployment,
+        "judge_deployment": settings.eval_judge_deployment or settings.azure_openai_chat_deployment,
+        "file": f"evals/results/{out_file.name}",
+        "capped": capped,
+    }
     data = {"meta": meta, "summary": summary, "results": results}
     out_file.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
     comparison = None

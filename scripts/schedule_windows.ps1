@@ -15,7 +15,8 @@ times are one hour earlier in UTC: Monday 22:30 UTC and Thursday 22:00 UTC. That
 Monday's last kickoff, and the Phase 5 digests (05:00 UTC) still run after it.
 
 -StartWhenAvailable catches up a run missed while the laptop was off; -WakeToRun wakes it from
-sleep. Each run writes a JSON summary to logs\ (gitignored).
+sleep; the tasks also run on battery. Docker Desktop must be running (start it at login). Each run
+writes a JSON summary to logs\ (gitignored). Re-running this script overwrites both tasks.
 #>
 param(
     [string]$Python = "python",
@@ -34,7 +35,9 @@ foreach ($r in $runs) {
         -Argument "-m ingestion $($r.Mode) --summary logs\ingest-$($r.Mode).json" `
         -WorkingDirectory $RepoRoot
     $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $r.Day -At $r.At
-    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun
+    # Task Scheduler's default only starts tasks on AC power; a laptop on battery would queue them.
+    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun `
+        -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     Register-ScheduledTask -TaskName $r.Name -Action $action -Trigger $trigger `
         -Settings $settings -Description "python -m ingestion $($r.Mode)" -Force | Out-Null
     Write-Host "Registered '$($r.Name)': $($r.Day) $($r.At) local time"

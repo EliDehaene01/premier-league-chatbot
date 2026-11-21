@@ -1,0 +1,30 @@
+:root{--bg:#faf9fc;--fg:#1f1530;--muted:#6b6280;--card:#fff;--line:#e6e1ee;--accent:#4b1f7a;
+--chip:#e3f3ea;--chip-fg:#1f5c3a}
+@media (prefers-color-scheme:dark){:root{--bg:#18121f;--fg:#efeaf5;--muted:#a79fb5;
+--card:#211a2b;--line:#352c42;--accent:#7fd8a8;--chip:#24392e;--chip-fg:#bfe9d1}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);
+font:16px/1.6 Inter,system-ui,sans-serif}main{max-width:760px;margin:0 auto;padding:24px 16px 64px}
+a{color:var(--accent)}header.site{border-bottom:1px solid var(--line);background:var(--card)}
+header.site div{max-width:760px;margin:0 auto;padding:12px 16px;display:flex;gap:16px;
+align-items:center;flex-wrap:wrap}header.site strong{font-size:15px}
+header.site nav{display:flex;gap:12px;font-size:14px}
+h1{font-size:28px;line-height:1.25;margin:8px 0}h2{font-size:19px;margin:28px 0 8px}
+.meta{color:var(--muted);font-size:14px}.card{background:var(--card);border:1px solid var(--line);
+border-radius:14px;padding:16px;margin:16px 0}ul{padding-left:20px}li{margin:6px 0}
+sup a{display:inline-block;min-width:16px;padding:0 4px;border-radius:4px;background:var(--chip);
+color:var(--chip-fg);font-size:11px;font-weight:600;text-decoration:none;text-align:center}
+ol.sources{font-size:14px;color:var(--muted)}table{width:100%;border-collapse:collapse;font-size:14px;
+font-variant-numeric:tabular-nums}
+th,td{padding:4px 6px;border-top:1px solid var(--line);text-align:center}
+th:nth-child(2),td:nth-child(2){text-align:left}.up{color:#1f8a4c}.down{color:#c0392b}
+.wrap{overflow-x:auto}img{max-width:100%;border-radius:10px;border:1px solid var(--line)}
+.q{font-weight:600}.archive li{display:flex;justify-content:space-between;gap:12px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:16px 0}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+.tile b{display:block;font-size:24px;line-height:1.2;font-variant-numeric:tabular-nums}
+.tile span{color:var(--muted);font-size:13px}
+.chart{width:100%;height:auto;display:block}.chart .bar{fill:var(--accent)}
+.chart .bar:hover{opacity:.75}.chart text{fill:var(--muted);font-size:11px}
+.chart line{stroke:var(--line)}td.l,th.l{text-align:left}
+.card h2:first-child{margin-top:0}td[class^=st-],td:last-child{white-space:nowrap}
+.st-ok{color:#1f8a4c}.st-warn{color:#a86400}.st-fail{color:#c0392b}

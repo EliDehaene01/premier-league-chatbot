@@ -15,6 +15,10 @@ pytestmark = pytest.mark.db
 def conn(db):
     fill_bronze(db)
     load_from_bronze(db)
+    # the sample fixture's real kickoff date passes with the calendar; keep it ahead of the fetch
+    db.execute(
+        "UPDATE silver.matches SET kickoff_utc = now() + interval '30 days' WHERE NOT is_finished"
+    )
     return db
 
 

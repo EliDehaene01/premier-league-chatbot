@@ -88,6 +88,28 @@ CREATE TABLE IF NOT EXISTS silver.match_events (
     PRIMARY KEY (match_id, seq)
 );
 
+CREATE TABLE IF NOT EXISTS silver.match_lineups (
+    match_id  int NOT NULL,
+    club_id   int NOT NULL,
+    formation text,                            -- e.g. 4-2-3-1
+    manager   text,
+    PRIMARY KEY (match_id, club_id)
+);
+
+CREATE TABLE IF NOT EXISTS silver.match_lineup_players (
+    match_id        int NOT NULL,
+    club_id         int NOT NULL,
+    player_id       int NOT NULL,
+    name            text NOT NULL,
+    shirt_num       int,
+    position        text,
+    is_captain      boolean NOT NULL DEFAULT false,
+    is_starter      boolean NOT NULL,
+    formation_row   int,                       -- 1 = goalkeeper, then forward; NULL for subs
+    formation_order int,                       -- position within the row, or bench order
+    PRIMARY KEY (match_id, player_id)
+);
+
 CREATE TABLE IF NOT EXISTS silver.standings_snapshots (
     season        int NOT NULL,
     matchweek     int NOT NULL,

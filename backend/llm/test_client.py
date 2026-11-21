@@ -37,7 +37,7 @@ def test_tool_call_then_answer(monkeypatch):
     assert turn.answer == "Arsenal are top."
     assert seen == [("get_league_table", {"as_of_matchweek": 10})]
     assert turn.tool_calls == [{"name": "get_league_table", "arguments": '{"as_of_matchweek": 10}'}]
-    assert abs(turn.cost_usd - 0.003) < 1e-9 and turn.prompt_version == "v1"
+    assert abs(turn.cost_usd - 0.003) < 1e-9 and turn.prompt_version == "v2"
     roles = [m["role"] for m in turn.messages]
     assert roles == ["user", "assistant", "tool", "assistant"]
     # stateless: the second call got the system prompt plus the whole conversation so far

@@ -224,3 +224,6 @@ __marimo__/
 
 # ingestion run summaries
 logs/
+
+# eval run outputs
+evals/results/

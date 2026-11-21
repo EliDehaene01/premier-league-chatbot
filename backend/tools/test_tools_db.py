@@ -100,3 +100,35 @@ def test_build_index_only_reembeds_changed_articles(ctx):
     assert build_index(ctx.conn, ctx.provider)["articles_indexed"] == 0
     ctx.conn.execute("UPDATE silver.articles SET body_text = 'new text' WHERE content_id = 4764661")
     assert build_index(ctx.conn, ctx.provider)["articles_indexed"] == 1
+
+
+def test_match_lineup_with_events(ctx):
+    from ingestion import sample_payloads as s
+    from ingestion.__main__ import bronze_sink
+
+    bronze_sink(ctx.conn)("sdp", "v3/matches/2645195/lineups", {}, s.LINEUPS)
+    load_from_bronze(ctx.conn)
+    out = run_tool(ctx, "get_match_lineup", {"club": "Arsenal", "opponent": "Coventry"})
+    (arsenal,) = out["teams"]  # Coventry's side was not published in the sample
+    assert (arsenal["club"], arsenal["formation"], arsenal["manager"]) == (
+        "Arsenal", "1-1", "Mikel Arteta",
+    )  # fmt: skip
+    gk, fwd = arsenal["starting_xi_gk_to_attack"]
+    assert gk["name"] == "David Raya" and fwd["captain"] and fwd["goals"] == ["15' Goal"]
+    (sub,) = arsenal["substitutes"]
+    assert (sub["name"], sub["came_on"]) == ("Max Dowman", "68")
+
+
+def test_match_lineup_not_announced_fetches_on_demand(ctx):
+    from ingestion import sample_payloads as s
+    from ingestion.silver import load_row
+
+    fetched = []
+
+    def fake_fetch(match_id):
+        fetched.append(match_id)
+        load_row(ctx.conn, f"v3/matches/{match_id}/lineups", s.LINEUPS_NOT_ANNOUNCED, ctx.now)
+
+    ctx.fetch_lineups = fake_fetch
+    out = run_tool(ctx, "get_match_lineup", {"match_id": 2645302})  # the PreMatch fixture
+    assert fetched == [2645302] and out["lineup_announced"] is False and "predicted" in out["note"]

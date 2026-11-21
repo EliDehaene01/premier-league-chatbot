@@ -123,6 +123,39 @@ def parse_events(match_id: int, payload: dict) -> list[dict]:
     ]
 
 
+def parse_lineups(match_id: int, payload: dict) -> tuple[list[dict], list[dict]]:
+    """(team rows, player rows); both empty while the line-ups are not announced."""
+    teams, players = [], []
+    for side in ("home_team", "away_team"):
+        t = payload.get(side) or {}
+        if not t.get("players"):
+            continue
+        club = int(t["teamId"])
+        formation = t.get("formation") or {}
+        managers = [m for m in t.get("managers") or [] if m.get("type", "Manager") == "Manager"]
+        teams.append({
+            "match_id": match_id,
+            "club_id": club,
+            "formation": formation.get("formation"),
+            "manager": " ".join(filter(None, [managers[0].get("firstName"),
+                                              managers[0].get("lastName")])) if managers else None,
+        })  # fmt: skip
+        slot = {pid: (r, o) for r, row in enumerate(formation.get("lineup") or [], 1)
+                for o, pid in enumerate(row, 1)}  # fmt: skip
+        bench = {pid: o for o, pid in enumerate(formation.get("subs") or [], 1)}
+        for p in t["players"]:
+            row, order = slot.get(p["id"], (None, bench.get(p["id"])))
+            name = p.get("knownName") or " ".join(filter(None, [p.get("firstName"),
+                                                                p.get("lastName")]))  # fmt: skip
+            players.append({
+                "match_id": match_id, "club_id": club, "player_id": int(p["id"]), "name": name,
+                "shirt_num": _int(p.get("shirtNum")), "position": p.get("position"),
+                "is_captain": bool(p.get("isCaptain")), "is_starter": p["id"] in slot,
+                "formation_row": row, "formation_order": order,
+            })  # fmt: skip
+    return teams, players
+
+
 def parse_standings(payload: dict, season: int, fetched_at: datetime) -> list[dict]:
     rows = []
     for e in payload["tables"][0]["entries"]:
@@ -277,6 +310,13 @@ def load_row(conn: psycopg.Connection, endpoint: str, payload: Any, fetched_at: 
         match_id = int(m.group(1))
         conn.execute("DELETE FROM silver.match_events WHERE match_id = %s", (match_id,))
         upsert(conn, "silver.match_events", parse_events(match_id, payload), ("match_id", "seq"))
+    elif m := re.fullmatch(r"v3/matches/(\d+)/lineups", endpoint):
+        match_id = int(m.group(1))
+        teams, players = parse_lineups(match_id, payload)
+        if teams:  # an empty (not yet announced) response must not wipe a stored line-up
+            conn.execute("DELETE FROM silver.match_lineup_players WHERE match_id = %s", (match_id,))
+            upsert(conn, "silver.match_lineups", teams, ("match_id", "club_id"))
+            upsert(conn, "silver.match_lineup_players", players, ("match_id", "player_id"))
     elif re.fullmatch(SEASON + r"/teams", endpoint):
         upsert(conn, "silver.clubs", parse_teams(payload.get("data", [])), ("club_id",))
     elif re.fullmatch(SEASON + r"/teams/\d+/squad", endpoint):

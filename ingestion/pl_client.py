@@ -90,6 +90,11 @@ class PLClient:
     def get_match_events(self, match_id: int | str) -> dict:
         return self._get(f"{SDP_API}/v1/matches/{match_id}/events")
 
+    def get_match_lineups(self, match_id: int | str) -> dict:
+        """v3 line-ups; before they are announced (about an hour before kick-off) both teams
+        come back with empty players and formation."""
+        return self._get(f"{SDP_API}/v3/matches/{match_id}/lineups")
+
     def get_leaderboard(self, season: int, sort: str = "goals") -> list[dict]:
         url = f"{self._season(season)}/players/stats/leaderboard"
         return self._paged(url, {"_sort": f"{sort}:desc"})

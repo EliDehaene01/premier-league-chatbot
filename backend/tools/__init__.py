@@ -29,6 +29,7 @@ class ToolContext:
     now: datetime = field(default_factory=lambda: datetime.now(UTC))
     shield: Any = shields.shield  # swapped in tests
     sources: list[dict] = field(default_factory=list)  # articles returned by search_news
+    fetch_lineups: Any = None  # match_id -> None; fetches into bronze/silver (None = live API)
 
 
 def _rows(ctx: ToolContext, sql: str, params=()) -> list[dict]:
@@ -90,7 +91,9 @@ def get_fixtures(ctx, club=None, date_from=None, date_to=None, limit: int = 10) 
     return {"fixtures": [_match(r) for r in rows], "times": "UTC"}
 
 
-def get_results(ctx, club=None, matchweek: int | None = None, limit: int = 10) -> dict:
+def get_results(
+    ctx, club=None, matchweek: int | None = None, limit: int = 10, oldest_first: bool = False
+) -> dict:
     club_id, err = _club_id(ctx, club)
     if err:
         return err
@@ -99,28 +102,39 @@ def get_results(ctx, club=None, matchweek: int | None = None, limit: int = 10) -
         f"SELECT {MATCH_COLS} FROM gold.match_results WHERE period = 'FullTime' "
         "AND (%s::int IS NULL OR matchweek = %s) "
         "AND (%s::int IS NULL OR %s IN (home_club_id, away_club_id)) "
-        "ORDER BY kickoff_utc DESC LIMIT %s",
+        f"ORDER BY kickoff_utc {'ASC' if oldest_first else 'DESC'} LIMIT %s",
         (matchweek, matchweek, club_id, club_id, min(limit, 50)),
     )
     return {"results": [_match(r) for r in rows]}
 
 
+def _find_match(ctx, club_a, club_b=None, date=None) -> tuple[int | None, dict | None]:
+    """A club's match: against club_b and/or on a date; else the latest played, else the next."""
+    a, err = _club_id(ctx, club_a)
+    b, err_b = _club_id(ctx, club_b)
+    if err or err_b or a is None:
+        return None, err or err_b or {"error": "give match_id, or a club"}
+    found = _rows(
+        ctx,
+        "SELECT match_id FROM gold.match_results WHERE %s IN (home_club_id, away_club_id) "
+        "AND (%s::int IS NULL OR %s IN (home_club_id, away_club_id)) "
+        "AND (%s::date IS NULL OR kickoff_utc::date = %s::date) "
+        "ORDER BY (period = 'FullTime' AND kickoff_utc <= %s) DESC, "
+        "abs(extract(epoch FROM kickoff_utc - %s))",
+        (a, b, b, date, date, ctx.now, ctx.now),
+    )
+    if not found:
+        return None, {"error": "no matching match found" + (f" on {date}" if date else "")}
+    return found[0]["match_id"], None
+
+
 def get_match_details(ctx, match_id=None, club_a=None, club_b=None, date=None) -> dict:
     if match_id is None:
-        a, err_a = _club_id(ctx, club_a)
-        b, err_b = _club_id(ctx, club_b)
-        if err_a or err_b or a is None or b is None:
-            return err_a or err_b or {"error": "give match_id, or club_a and club_b"}
-        found = _rows(
-            ctx,
-            "SELECT match_id FROM gold.match_results WHERE (home_club_id, away_club_id) IN "
-            "((%s, %s), (%s, %s)) AND (%s::date IS NULL OR kickoff_utc::date = %s::date) "
-            "ORDER BY (period = 'FullTime') DESC, abs(extract(epoch FROM kickoff_utc - %s))",
-            (a, b, b, a, date, date, ctx.now),
-        )
-        if not found:
-            return {"error": "no match found between those clubs" + (f" on {date}" if date else "")}
-        match_id = found[0]["match_id"]
+        if not club_b:
+            return {"error": "give match_id, or club_a and club_b"}
+        match_id, err = _find_match(ctx, club_a, club_b, date)
+        if err:
+            return err
     match = _rows(ctx, f"SELECT {MATCH_COLS} FROM gold.match_results WHERE match_id = %s",
                   (match_id,))  # fmt: skip
     if not match:
@@ -144,6 +158,70 @@ def get_match_details(ctx, match_id=None, club_a=None, club_b=None, date=None) -
     subs = [{"minute": e["minute"], "club": e["club"], "on": e["player"], "off": e["other"]}
             for e in events if e["event_type"] == "sub"]  # fmt: skip
     return {"match": _match(match[0]), "goals": goals, "cards": cards, "substitutions": subs}
+
+
+def _fetch_lineups_live(ctx, match_id: int) -> None:
+    from ingestion.__main__ import bronze_sink  # tools stay importable without ingestion deps
+    from ingestion.pl_client import PLClient
+    from ingestion.silver import load_row
+
+    payload = PLClient(on_response=bronze_sink(ctx.conn)).get_match_lineups(match_id)
+    load_row(ctx.conn, f"v3/matches/{match_id}/lineups", payload, ctx.now)
+
+
+def get_match_lineup(ctx, match_id=None, club=None, opponent=None, date=None) -> dict:
+    if match_id is None:
+        match_id, err = _find_match(ctx, club, opponent, date)
+        if err:
+            return err
+    match = _rows(ctx, f"SELECT {MATCH_COLS} FROM gold.match_results WHERE match_id = %s",
+                  (match_id,))  # fmt: skip
+    if not match:
+        return {"error": f"unknown match_id {match_id}"}
+    teams_sql = "SELECT club_id, formation, manager FROM silver.match_lineups WHERE match_id = %s"
+    teams = _rows(ctx, teams_sql, (match_id,))
+    if not teams and match[0]["period"] != "FullTime":  # announced about an hour before kickoff
+        (ctx.fetch_lineups or (lambda m: _fetch_lineups_live(ctx, m)))(match_id)
+        teams = _rows(ctx, teams_sql, (match_id,))
+    if not teams:
+        return {"match": _match(match[0]), "lineup_announced": False,
+                "note": "line-ups are not published yet (usually about an hour before kick-off);"
+                        " search_news can find predicted line-ups"}  # fmt: skip
+    players = _rows(
+        ctx,
+        "SELECT p.club_id, p.player_id, p.name, p.shirt_num, p.position, p.is_captain, "
+        "p.is_starter, p.formation_row, p.formation_order FROM silver.match_lineup_players p "
+        "WHERE p.match_id = %s ORDER BY p.is_starter DESC, p.formation_row, p.formation_order",
+        (match_id,),
+    )
+    events = _rows(ctx, "SELECT event_type, detail, minute, player_id, secondary_player_id "
+                        "FROM silver.match_events WHERE match_id = %s ORDER BY seq",
+                   (match_id,))  # fmt: skip
+    clubs = {c["club_id"]: c["name"] for c in _rows(ctx, "SELECT club_id, name FROM silver.clubs")}
+    out_teams = []
+    for t in teams:
+        xi, bench = [], []
+        for p in (p for p in players if p["club_id"] == t["club_id"]):
+            pid = p["player_id"]
+            row = {"name": p["name"], "shirt": p["shirt_num"], "position": p["position"]}
+            if p["is_captain"]:
+                row["captain"] = True
+            for e in events:
+                if e["event_type"] == "goal" and e["player_id"] == pid:
+                    row.setdefault("goals", []).append(f"{e['minute']}' {e['detail']}")
+                elif e["event_type"] == "goal" and e["secondary_player_id"] == pid:
+                    row.setdefault("assists", []).append(f"{e['minute']}'")
+                elif e["event_type"] == "card" and e["player_id"] == pid:
+                    row.setdefault("cards", []).append(f"{e['minute']}' {e['detail']}")
+                elif e["event_type"] == "sub" and e["player_id"] == pid:
+                    row["came_on"] = e["minute"]
+                elif e["event_type"] == "sub" and e["secondary_player_id"] == pid:
+                    row["went_off"] = e["minute"]
+            (xi if p["is_starter"] else bench).append(row)
+        out_teams.append({"club": clubs.get(t["club_id"]), "formation": t["formation"],
+                          "manager": t["manager"], "starting_xi_gk_to_attack": xi,
+                          "substitutes": bench})  # fmt: skip
+    return {"match": _match(match[0]), "lineup_announced": True, "teams": out_teams}
 
 
 def get_top_scorers(ctx, limit: int = 10, stat: str = "goals") -> dict:
@@ -264,13 +342,22 @@ TOOLS: dict[str, tuple[Any, dict]] = {
         "get_fixtures", "Upcoming matches (not yet played), soonest first. Times in UTC.",
         {"club": CLUB, "date_from": DATE, "date_to": DATE, "limit": LIMIT})),
     "get_results": (get_results, _schema(
-        "get_results", "Finished matches with scores, most recent first.",
-        {"club": CLUB, "matchweek": {"type": "integer"}, "limit": LIMIT})),
+        "get_results", "Finished matches with scores, most recent first (oldest_first for the "
+        "start of the season).",
+        {"club": CLUB, "matchweek": {"type": "integer"}, "limit": LIMIT,
+         "oldest_first": {"type": "boolean"}})),
     "get_match_details": (get_match_details, _schema(
         "get_match_details",
         "One match: score, scorers and assists, cards, substitutions. Give match_id, or two "
         "clubs (and a date when they meet twice; without one the latest played meeting).",
         {"match_id": {"type": "integer"}, "club_a": CLUB, "club_b": CLUB, "date": DATE})),
+    "get_match_lineup": (get_match_lineup, _schema(
+        "get_match_lineup",
+        "Line-ups of one match: formation, starting XI (goalkeeper to attack), substitutes, "
+        "captain, manager, and per player goals, assists, cards and when they came on or off. "
+        "Give match_id, or a club (plus opponent and/or date; a club alone means its latest "
+        "played match). Upcoming matches only have line-ups about an hour before kick-off.",
+        {"match_id": {"type": "integer"}, "club": CLUB, "opponent": CLUB, "date": DATE})),
     "get_top_scorers": (get_top_scorers, _schema(
         "get_top_scorers", "Season leaderboard for goals, assists or clean sheets.",
         {"stat": {"type": "string", "enum": list(STATS)}, "limit": LIMIT})),

@@ -19,7 +19,8 @@ class Settings(BaseSettings):
     content_safety_endpoint: str = ""
     content_safety_api_key: str = ""
 
-    prompt_version: str = "v1"
+    prompt_version: str = "v2"
+    eval_judge_deployment: str = ""  # LLM judge for evals; empty = the chat deployment
     recency_half_life_days: float = 14.0
 
     pl_season: int = 2026

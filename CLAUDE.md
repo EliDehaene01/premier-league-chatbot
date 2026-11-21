@@ -48,13 +48,14 @@ docs/         # data_sources.md, adr/
 - Ingestion: `python -m ingestion backfill|matchweek|news|rebuild` (see README)
 - RAG index: `python -m backend.rag.build_index` (after ingestion); chat: `python -m backend.chat`
 - Retrieval smoke check: `python -m evals.retrieval_smoke`
+- Evals: `python -m evals.run --dataset chat_v1` (full, about $1) or `--subset smoke`; needs `pip install -e .[eval]`. Never lower `evals/thresholds.yaml` to get green.
 
 ## Current phase
 
 - [x] 0 Setup and source spike
 - [x] 1 Ingestion: bronze / silver / gold
 - [x] 2 RAG + tools + chat loop
-- [ ] 3 Evals dataset
+- [x] 3 Evals dataset (chat_v1, evaluators, runner, thresholds)
 - [ ] 4 API + React UI
 - [ ] 5 Weekly digests + own MCP server. Mon 23:30 UTC ingest, Tue 05:00 UTC matchweek recap; Thu 23:00 UTC ingest, Fri 05:00 UTC news highlights; summaries published to GitHub Pages
 - [ ] 6 AI Ops: Langfuse tracing, CI eval gate, cost and latency dashboard, feedback loop

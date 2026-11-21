@@ -10,11 +10,13 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "python-dotenv>=1.0",
+    "pyyaml>=6.0",
     "tzdata>=2024.1",  # zoneinfo data on Windows
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6", "respx>=0.21"]
+eval = ["azure-ai-evaluation>=1.18"]  # LLM judges; only the eval runner imports it
 
 [build-system]
 requires = ["setuptools>=68"]

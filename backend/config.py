@@ -14,6 +14,13 @@ class Settings(BaseSettings):
     azure_openai_api_key: str = ""
     azure_openai_chat_deployment: str = ""
     azure_openai_embedding_deployment: str = ""
+    embedding_dimensions: int = 1536  # text-embedding-3-small
+
+    content_safety_endpoint: str = ""
+    content_safety_api_key: str = ""
+
+    prompt_version: str = "v1"
+    recency_half_life_days: float = 14.0
 
     pl_season: int = 2026
 

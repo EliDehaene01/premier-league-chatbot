@@ -25,7 +25,18 @@ python -m ingestion news                     # articles since last run
 python -m ingestion rebuild                  # rebuild silver from bronze, no network
 ```
 
-Each mode ends with data-quality checks and exits non-zero if one fails; `--summary out.json` writes a run summary. To schedule the weekly runs on Windows, run `scripts/schedule_windows.ps1` once. Schema: [docs/ingestion_schema.md](docs/ingestion_schema.md).
+## Chat
+
+```bash
+python -m backend.rag.build_index            # embed new or changed articles (after ingestion)
+python -m backend.chat                       # interactive chat; prints tool calls and sources
+python -m backend.chat --ask "Who is top of the league?"
+python -m evals.retrieval_smoke              # retrieval sanity check: hit@5 and MRR
+```
+
+Needs the Azure OpenAI and Content Safety settings in `.env` (see `.env.example`).
+
+Each ingestion mode ends with data-quality checks and exits non-zero if one fails; `--summary out.json` writes a run summary. To schedule the weekly runs on Windows, run `scripts/schedule_windows.ps1` once. Schema: [docs/ingestion_schema.md](docs/ingestion_schema.md).
 
 ## Status
 
@@ -33,8 +44,8 @@ Each mode ends with data-quality checks and exits non-zero if one fails; `--summ
 |---|---|---|
 | 0 | Setup and data source spike | done |
 | 1 | Ingestion: bronze / silver / gold | done |
-| 2 | RAG + tools + chat loop | next |
-| 3 | Evals dataset | |
+| 2 | RAG + tools + chat loop | done |
+| 3 | Evals dataset | next |
 | 4 | API + React UI | |
 | 5 | Weekly digests (GitHub Pages) + own MCP server | |
 | 6 | AI Ops: tracing, CI eval gate, dashboards, feedback | |

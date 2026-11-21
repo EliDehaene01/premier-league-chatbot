@@ -22,8 +22,7 @@ A local chatbot about the current Premier League season (2026-27, season id 2026
 
 ```
 ingestion/    # pl_client.py, pulls into bronze, bronze -> silver -> gold
-backend/      # config.py, db.py (schema DDL), llm, rag, tools, chat loop, API
-prompts/      # versioned prompt files
+backend/      # config.py, db.py (schema DDL), llm/, rag/, tools/, prompts/ (versioned), chat.py, API
 evals/        # eval dataset + runner
 mcp_server/   # own Premier League MCP server (FastMCP)
 digests/      # weekly digest generation
@@ -36,7 +35,8 @@ docs/         # data_sources.md, adr/
 
 - Python 3.12, one `pyproject.toml`, ruff line-length 100.
 - Tests live beside the code as `test_*.py`. Tests hitting real APIs are marked `live` and skipped unless `PLC_LIVE_TESTS=1`.
-- Prompts are versioned files, not inline strings.
+- Prompts are versioned files (`backend/prompts/system_vN.md`), not inline strings; a new behaviour gets a new version, and the version is recorded on every `llm_calls` row.
+- Tools return dicts and report problems as `{"error": ...}`; they never raise on bad input.
 - One ADR per decision in `docs/adr/`.
 
 ## Commands
@@ -46,12 +46,14 @@ docs/         # data_sources.md, adr/
 - Lint: `ruff check .`
 - Tests: `pytest -m "not live"` (includes `db` tests, which use a throwaway `plc_test` database on the compose Postgres); live: `PLC_LIVE_TESTS=1 pytest -m live`
 - Ingestion: `python -m ingestion backfill|matchweek|news|rebuild` (see README)
+- RAG index: `python -m backend.rag.build_index` (after ingestion); chat: `python -m backend.chat`
+- Retrieval smoke check: `python -m evals.retrieval_smoke`
 
 ## Current phase
 
 - [x] 0 Setup and source spike
 - [x] 1 Ingestion: bronze / silver / gold
-- [ ] 2 RAG + tools + chat loop
+- [x] 2 RAG + tools + chat loop
 - [ ] 3 Evals dataset
 - [ ] 4 API + React UI
 - [ ] 5 Weekly digests + own MCP server. Mon 23:30 UTC ingest, Tue 05:00 UTC matchweek recap; Thu 23:00 UTC ingest, Fri 05:00 UTC news highlights; summaries published to GitHub Pages

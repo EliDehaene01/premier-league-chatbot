@@ -5,6 +5,7 @@ description = "Premier League chatbot: tool calling for stats, RAG over official
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.27",
+    "openai>=1.60",
     "psycopg[binary]>=3.2",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
@@ -21,6 +22,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["ingestion*", "backend*", "evals*"]
+
+[tool.setuptools.package-data]
+"backend.prompts" = ["*.md"]
 
 [tool.ruff]
 line-length = 100

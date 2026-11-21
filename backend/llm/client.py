@@ -9,6 +9,7 @@ from backend.llm import citations
 from backend.llm.providers import tool_call_message, tool_result_message
 from backend.observability import tracing
 from backend.prompts import load_prompt
+from backend.season import latest_complete_matchweek
 from backend.tools import TOOL_SPECS, ToolContext, run_tool
 
 MAX_TOOL_ROUNDS = 5
@@ -33,9 +34,9 @@ class ChatTurn:
 
 
 def system_prompt(ctx: ToolContext, version: str) -> str:
-    completed, upcoming = ctx.conn.execute(
-        "SELECT (SELECT max(matchweek) FROM silver.standings_snapshots), "
-        "(SELECT min(matchweek) FROM silver.matches WHERE period = 'PreMatch')"
+    completed = latest_complete_matchweek(ctx.conn, ctx.now)
+    (upcoming,) = ctx.conn.execute(
+        "SELECT min(matchweek) FROM silver.matches WHERE period = 'PreMatch'"
     ).fetchone()
     return load_prompt(
         version,

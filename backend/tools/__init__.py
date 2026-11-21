@@ -14,6 +14,7 @@ from psycopg.rows import dict_row
 
 from backend.llm.providers import LLMProvider
 from backend.rag import retrieval, shields
+from backend.season import latest_complete_matchweek
 from backend.tools.resolver import resolve_club, resolve_player
 
 STATS = ("goals", "assists", "clean_sheets")
@@ -76,7 +77,30 @@ def get_league_table(ctx: ToolContext, as_of_matchweek: int | None = None) -> di
         "WHERE s.matchweek = %s ORDER BY s.position",
         (mw,),
     )
-    return {"after_matchweek": mw, "source_id": f"t{mw}", "table": table}
+    return {**_table_label(ctx, mw), "source_id": f"t{mw}", "table": table}
+
+
+def _table_label(ctx: ToolContext, mw: int) -> dict:
+    """The official table is stored under the matchweek that was active when it was fetched,
+    which may be only partly played: say which matchweek it is complete after, and what of
+    the next one it already includes."""
+    row = _rows(
+        ctx,
+        "SELECT count(*) AS total, count(*) FILTER (WHERE m.is_finished AND m.kickoff_utc <= "
+        "s.fetched) AS played FROM silver.matches m, (SELECT max(fetched_at) AS fetched FROM "
+        "silver.standings_snapshots WHERE matchweek = %s) s WHERE m.matchweek = %s "
+        "AND m.season = (SELECT max(season) FROM silver.matches)",
+        (mw, mw),
+    )[0]
+    completed = latest_complete_matchweek(ctx.conn, ctx.now)
+    if row["played"] == row["total"] or (completed is not None and completed >= mw):
+        return {"after_matchweek": mw}
+    label = {"after_matchweek": mw - 1, "matchweek_in_progress": mw}
+    label["note"] = (
+        f"the live table: every game up to matchweek {mw - 1}, plus {row['played']} of the "
+        f"{row['total']} matchweek {mw} games played so far"
+    )
+    return label
 
 
 def get_fixtures(ctx, club=None, date_from=None, date_to=None, limit: int = 10) -> dict:

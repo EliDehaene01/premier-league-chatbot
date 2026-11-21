@@ -174,6 +174,13 @@ def test_showcase_page_without_recordings(tmp_path):
     assert "Who is top?" in site.showcase_html(tmp_path)
 
 
+def test_showcase_shows_the_demo_gif_before_screenshots(tmp_path):
+    (tmp_path / "01-chat.png").write_bytes(b"png")
+    (tmp_path / "10-chat-demo.gif").write_bytes(b"gif")
+    html = site.showcase_html(tmp_path)
+    assert html.index("10-chat-demo.gif") < html.index("01-chat.png")
+
+
 def test_publish_writes_an_orphan_gh_pages_branch_then_updates_it(tmp_path):
     import subprocess
 

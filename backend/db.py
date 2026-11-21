@@ -216,6 +216,16 @@ CREATE TABLE IF NOT EXISTS public.chat_turns (
     latency_ms      int,
     error           text
 );
+-- data freshness checks after each scheduled ingestion (backend/observability/freshness.py)
+CREATE TABLE IF NOT EXISTS public.freshness_checks (
+    id         bigserial PRIMARY KEY,
+    checked_at timestamptz NOT NULL DEFAULT now(),
+    name       text NOT NULL,
+    status     text NOT NULL CHECK (status IN ('ok', 'warn', 'fail')),
+    detail     text NOT NULL,
+    data       jsonb NOT NULL DEFAULT '{}'
+);
+
 -- Phase 6: the Langfuse trace of the turn, so feedback can be attached to it as a score
 ALTER TABLE public.chat_turns ADD COLUMN IF NOT EXISTS trace_id text;
 

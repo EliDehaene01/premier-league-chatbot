@@ -109,6 +109,7 @@ export interface Health {
   latest_finished_match?: string | null
   table_after_matchweek?: number | null
   indexed_chunks?: number
+  checks?: { name: string; status: "ok" | "warn" | "fail"; detail: string }[]
 }
 
 export interface DigestItem {

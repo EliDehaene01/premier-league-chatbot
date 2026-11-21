@@ -9,10 +9,13 @@ function zone(pos: number, total: number): string {
   return "border-l-transparent"
 }
 
-export function LeagueTable({ data }: { data: { after_matchweek: number; table: TableRow[] } }) {
+type TableData = { after_matchweek: number; matchweek_in_progress?: number; table: TableRow[] }
+
+export function LeagueTable({ data }: { data: TableData }) {
+  const live = data.matchweek_in_progress ? ` · MW${data.matchweek_in_progress} in progress` : ""
   const rows = data.table
   return (
-    <WidgetCard title="Premier League table" meta={`After matchweek ${data.after_matchweek}`}>
+    <WidgetCard title="Premier League table" meta={`After matchweek ${data.after_matchweek}${live}`}>
       <table className="w-full text-xs tabular-nums">
         <thead className="text-muted-foreground">
           <tr className="[&>th]:px-2 [&>th]:py-1.5 [&>th]:font-medium">

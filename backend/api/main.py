@@ -27,7 +27,8 @@ from pydantic import BaseModel, Field
 from backend.db import get_connection, init_db
 from backend.llm.client import chat
 from backend.llm.providers import AzureOpenAIProvider, LLMProvider
-from backend.observability import tracing
+from backend.observability import freshness, tracing
+from backend.season import latest_complete_matchweek
 from backend.tools import ToolContext
 
 MAX_MESSAGE_CHARS = 1000
@@ -275,24 +276,28 @@ def create_app(
 
     @app.get("/api/health")
     def health() -> dict:
+        """Database reachable, plus the freshness checks (ingestion, results, table, news,
+        index, digests): any warning or failure makes the status "degraded"."""
         try:
             with connect() as conn:
-                article, match, matchweek, chunks = conn.execute(
+                article, match, chunks = conn.execute(
                     "SELECT (SELECT max(published_at) FROM silver.articles), "
                     "(SELECT max(kickoff_utc) FROM silver.matches WHERE is_finished), "
-                    "(SELECT max(matchweek) FROM silver.standings_snapshots), "
                     "(SELECT count(*) FROM silver.article_chunks)"
                 ).fetchone()
+                now = datetime.now(UTC)
+                checks = freshness.run_checks(conn, now)
+                completed = latest_complete_matchweek(conn, now)
         except psycopg.Error:
             return {"status": "down", "db": False}
-        stale = article is None or (datetime.now(UTC) - article).days > 7
         return {
-            "status": "degraded" if stale else "ok",
+            "status": "ok" if freshness.worst(checks) == "ok" else "degraded",
             "db": True,
             "latest_article": article,
             "latest_finished_match": match,
-            "table_after_matchweek": matchweek,
+            "table_after_matchweek": completed,
             "indexed_chunks": chunks,
+            "checks": [{"name": c.name, "status": c.status, "detail": c.detail} for c in checks],
         }
 
     @app.get("/api/digests/latest")

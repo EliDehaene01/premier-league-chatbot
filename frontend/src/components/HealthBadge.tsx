@@ -11,10 +11,12 @@ export function HealthBadge({ health }: { health: Health | null }) {
     health.latest_article ? `news to ${formatDate(health.latest_article)}` : null,
   ].filter(Boolean)
   const label = health.status === "down" ? "API offline" : parts.join(", ") || "Connected"
+  const problems = (health.checks ?? []).filter((c) => c.status !== "ok")
+  const title = [`Data status: ${health.status}`, ...problems.map((c) => `${c.name}: ${c.detail}`)]
   return (
     <span
       className="flex items-center gap-2 text-xs text-muted-foreground"
-      title={`Data status: ${health.status}`}
+      title={title.join("\n")}
     >
       <span className={cn("size-2 rounded-full", DOT[health.status])} aria-hidden="true" />
       <span className="hidden sm:inline">{label}</span>

@@ -77,7 +77,13 @@ def get_league_table(ctx: ToolContext, as_of_matchweek: int | None = None) -> di
         "WHERE s.matchweek = %s ORDER BY s.position",
         (mw,),
     )
-    return {**_table_label(ctx, mw), "source_id": f"t{mw}", "table": table}
+    out = {**_table_label(ctx, mw), "source_id": f"t{mw}", "table": table}
+    if mw != snaps[-1]:
+        out["newer_table"] = (
+            f"this is an older table; call without as_of_matchweek for the current one "
+            f"(stored under matchweek {snaps[-1]})"
+        )
+    return out
 
 
 def _table_label(ctx: ToolContext, mw: int) -> dict:
@@ -393,7 +399,10 @@ LIMIT = {"type": "integer", "minimum": 1, "maximum": 50}
 
 TOOLS: dict[str, tuple[Any, dict]] = {
     "get_league_table": (get_league_table, _schema(
-        "get_league_table", "Premier League table, latest or after a given matchweek.",
+        "get_league_table",
+        "Premier League table. Without as_of_matchweek: the current table, including games "
+        "already played in a matchweek in progress; use this for any question about the table "
+        "now. as_of_matchweek only for how the table stood after an earlier matchweek.",
         {"as_of_matchweek": {"type": "integer"}})),
     "get_fixtures": (get_fixtures, _schema(
         "get_fixtures", "Upcoming matches (not yet played), soonest first. Times in UTC.",

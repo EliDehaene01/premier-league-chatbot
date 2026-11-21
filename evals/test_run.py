@@ -9,7 +9,7 @@ import pytest
 
 from backend.llm.fake_provider import FakeProvider, call
 from backend.llm.providers import ChatResult
-from evals.run import below_thresholds, compare, run, summarize
+from evals.run import below_thresholds, compare, run, summarize, why_failed
 from ingestion.silver import load_from_bronze
 from ingestion.test_ingestion_db import fill_bronze
 
@@ -98,3 +98,20 @@ def test_runner_stops_at_the_cost_cap(seeded):
                           make_provider=lambda c: ScriptedProvider(),
                           make_judge=lambda c: Judge())  # fmt: skip
     assert capped and results == []
+
+
+def test_why_failed_lists_failing_checks_tools_and_answer():
+    result = {
+        "passed": False,
+        "checks": {
+            "tool_selection": {"passed": True, "detail": "ok"},
+            "exact_answer": {"passed": False, "detail": "missing Arsenal"},
+        },
+        "tool_calls": [{"name": "get_league_table", "arguments": {}}],
+        "answer": "Chelsea are top\nwith 25 points.",
+    }
+    lines = why_failed(result)
+    assert lines[0].strip() == "exact_answer: missing Arsenal"
+    assert "get_league_table" in lines[1]
+    assert lines[2].strip() == "answer: Chelsea are top with 25 points."
+    assert why_failed({"passed": True}) == []

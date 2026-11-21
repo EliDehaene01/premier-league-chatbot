@@ -88,3 +88,4 @@ jobs:
           path: |
             eval-report.md
             ingest.json
+            evals/results/*.json

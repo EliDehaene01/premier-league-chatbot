@@ -1,6 +1,6 @@
 """python -m evals.retrieval_smoke: hit rate at 5 and MRR on hand-labelled queries.
 
-A sanity check of hybrid retrieval on the real index, not the Phase 3 eval suite.
+A sanity check of hybrid retrieval on the real index, not the eval suite (`python -m evals.run`).
 """
 
 import json

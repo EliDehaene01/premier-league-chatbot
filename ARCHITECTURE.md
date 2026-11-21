@@ -4,6 +4,34 @@
 
 A local system: Postgres 16 with pgvector holds all data, a Python backend runs ingestion, retrieval and the chat loop against Azure OpenAI (Microsoft Foundry), and a React UI talks to the backend. Scope is the current season only (2026-27, season id 2026).
 
+## Decisions
+
+Every choice that shapes the project, with where it is argued in full. ADRs live in [docs/adr/](docs/adr/).
+
+| Decision | Why, in one line | Where |
+|---|---|---|
+| Stats through tool calls, news through RAG | numbers must be exact and current; articles are prose | [ADR 0001](docs/adr/0001-tool-calling-for-stats-rag-for-news.md) |
+| One Postgres (with pgvector) for data and vectors | one store to run, back up and join across | [ADR 0002](docs/adr/0002-single-postgres-store.md) |
+| The public JSON feeds premierleague.com uses itself | complete, current and free; raw bronze guards against changes | [ADR 0003](docs/adr/0003-data-sources.md) |
+| Bronze (raw, append-only) → silver (typed) → gold (views) | any bug in parsing can be fixed by replaying bronze, without refetching | [Ingestion](#ingestion-bronzesilvergold) |
+| One polite HTTP client with a delay and backoff | the feeds are someone else's servers | [Ingestion](#ingestion-bronzesilvergold) |
+| Current season only | small data, unambiguous answers | [Trade-offs](#trade-offs) |
+| Local-first; Azure OpenAI via Foundry (`gpt-5.4-mini`, `text-embedding-3-small`) | the budget goes to model calls, not hosting | [ADR 0012](docs/adr/0012-local-first-on-azure-openai.md) |
+| Hybrid retrieval (vector + full text, RRF) with a recency weight | names and "matchweek 8" need exact matching; news goes stale | [ADR 0006](docs/adr/0006-hybrid-retrieval.md) |
+| Prompt Shields on every retrieved chunk, failing closed | articles are the main injection path into the prompt | [RAG pipeline](#rag-pipeline) |
+| Versioned prompt files, version stored on every model call | a behaviour change is reviewable and comparable in evals | [Chat loop](#chat-loop) |
+| Citation markers resolved by code, not URLs written by the model | the model cannot invent a link | [ADR 0008](docs/adr/0008-structured-citations.md) |
+| Evals with SQL goldens, code checks first, judges only where needed | goldens stay correct as the season moves; judges are biased | [ADR 0007](docs/adr/0007-eval-design.md) |
+| Thresholds from a measured run minus one case, never lowered | a real regression fails, one flaky case does not | [Evaluation](#evaluation) |
+| Weekly summaries: facts gathered by code, prose by the model, every line validated | a summary can't state a score that didn't happen | [ADR 0009](docs/adr/0009-digests-on-github-pages.md) |
+| Summary ranking with fixed weights in a config file | the same week always ranks the same way | [Weekly digests](#weekly-digests) |
+| Own MCP server serving the exact chat tool schemas | one tool layer for the app, Claude and VS Code | [ADR 0004](docs/adr/0004-own-mcp-server.md) |
+| The chat itself is an MCP client (in-process by default) | the evals measure what other MCP clients get too | [ADR 0010](docs/adr/0010-chat-as-mcp-client.md) |
+| Self-hosted Langfuse for traces; only totals published | traces hold questions and answers, which stay local | [ADR 0005](docs/adr/0005-langfuse-for-tracing.md), [ADR 0011](docs/adr/0011-ai-ops.md) |
+| Eval gate on GitHub runs the full set, started by hand only | the smoke subset was too small; every run costs about $0.90 | [ADR 0011](docs/adr/0011-ai-ops.md) |
+| No betting advice; off-topic questions declined | scope and responsibility | [Chat loop](#chat-loop) |
+| Secrets only in `.env`, never in code, compose files or commits | the repository is public | [README](README.md#step-4-fill-in-your-settings) |
+
 ## Data sources
 
 The unauthenticated JSON APIs that www.premierleague.com calls itself: the Content API for articles and the SDP football API for structured data, with the FPL API as fallback. Details and field lists: [docs/data_sources.md](docs/data_sources.md), decision: [ADR 0003](docs/adr/0003-data-sources.md).
@@ -19,7 +47,7 @@ PLClient --on_response--> bronze.api_responses --load_from_bronze--> silver.* --
 
 - **bronze**: `bronze.api_responses`: one row per HTTP response (source, endpoint, params, payload, fetched_at, sha256). A trigger rejects UPDATE and DELETE.
 - **silver**: typed rows upserted by natural key: clubs, players, matches, match_events, standings_snapshots, player_season_stats, articles. Re-running any mode, or replaying all of bronze (`python -m ingestion rebuild`), gives the same rows.
-- **gold**: views and SQL functions the Phase 2 tools will query: `league_table_current`, `top_scorers`, `top_assists`, `club_form_last5`, `matchweek_results(mw)`, `head_to_head(a, b)`, `table_moves`. Embedded article chunks for RAG live in `silver.article_chunks` (see RAG pipeline).
+- **gold**: views and SQL functions the tools query: `league_table_current`, `top_scorers`, `top_assists`, `club_form_last5`, `matchweek_results(mw)`, `head_to_head(a, b)`, `table_moves`. Embedded article chunks for RAG live in `silver.article_chunks` (see RAG pipeline).
 
 Only `backend/db.py` owns DDL (`init_db()` is idempotent and runs at the start of every CLI mode). `db/init.sql` only creates the extension and schemas on a fresh volume. Tables, keys and columns: [docs/ingestion_schema.md](docs/ingestion_schema.md).
 
@@ -115,18 +143,23 @@ query --> embed --> vector top 20 --\
 
 | Tool | Answers |
 |---|---|
-| `get_league_table(as_of_matchweek?)` | the table, latest or after a stored matchweek |
+| `get_league_table(as_of_matchweek?)` | the table, latest or after a stored matchweek, plus the leader, top four and relegation zone spelled out |
 | `get_fixtures(club?, date_from?, date_to?, limit)` | upcoming matches, UTC |
-| `get_results(club?, matchweek?, limit, oldest_first)` | finished matches |
+| `get_results(club?, matchweek?, limit, oldest_first)` | finished matches; with a matchweek also the total goals |
 | `get_match_details(match_id \| club_a + club_b [+ date])` | score, scorers and assists, cards, substitutions |
 | `get_match_lineup(match_id \| club [+ opponent, date])` | formation, starting XI goalkeeper to attack, bench, captain, manager, per-player goals, assists, cards and sub minutes; fetched on demand for upcoming matches, "not announced" until about an hour before kick-off |
 | `get_top_scorers(stat goals\|assists\|clean_sheets, limit)` | leaderboards |
 | `get_player_stats(name)`, `compare_players(names)` | season stats and profile |
-| `get_club_info(club)` | stadium, position, last-5 form, next fixture, last result |
+| `get_club_info(club)` | stadium, position, last-5 form, next fixture, next home fixture, last result |
 | `get_head_to_head(club_a, club_b)` | this season's meetings |
 | `search_news(query, club?, days?, k, include_fantasy)` | shielded article chunks with title, date and URL |
+| `get_weekly_digest(kind)` | the newest matchweek recap or news highlights, line by line with their sources |
 
 Names go through one resolver (`backend/tools/resolver.py`). It tries exact name, short name or abbreviation, then aliases ("Spurs", "Man Utd", "Toon"), then partial and fuzzy matches. Player names are matched without accents, by full name, surname or first name, with fuzzy matching for typos. When a name fits several clubs or players ("United", "Gabriel"), the candidates go back to the model so it can ask.
+
+Some fields exist because the model got them wrong from raw rows, as the eval gate showed: the table's `leader`, `top_four` and `relegation_zone`, the matchweek `total_goals`, and the club's `next_home_fixture`. Sums and picks are done in code, so the model only has to read them out.
+
+The official table is stored under the matchweek that was active when it was fetched. `get_league_table` therefore reports the last *completed* matchweek (`backend/season.py`, shared with the system prompt and the recap) and, mid-matchweek, `matchweek_in_progress` with how many of its games are in.
 
 ## Chat loop
 
@@ -161,13 +194,41 @@ Two summaries a week, written from stored data only (`digests/`), shown on the a
 
 **GitHub Pages** ([ADR 0009](docs/adr/0009-digests-on-github-pages.md)). `digests/site.py` renders a small static site (index, one page per digest, archive, and a showcase page with screenshots and recorded conversations from `docs/showcase/`) and commits it to the `gh-pages` branch through a separate git worktree (`.site/`), so publishing never touches the branch that is checked out. Pages serves that branch as is. The scheduled runs on the laptop push it with the laptop's git credentials.
 
-**Evals** (`python -m evals.digests`, dataset `evals/datasets/digests_v1.jsonl`, pinned to past weeks): code checks for citations, scores, fixture coverage, hand-labelled stories, format and the share of lines that survived validation, plus one judge call per digest for faithfulness. Thresholds in `evals/digest_thresholds.yaml` are report-only until the first measured run.
+**Evals** (`python -m evals.digests`, dataset `evals/datasets/digests_v1.jsonl`, pinned to past weeks): code checks for citations, scores, fixture coverage, hand-labelled stories, format and the share of lines that survived validation, plus one judge call per digest for faithfulness. Thresholds in `evals/digest_thresholds.yaml` come from the first measured run, minus one case of slack. Two stay at 0 for now: `must_mention`, with only 2 labelled cases, and `faithfulness`, whose judge proved unreliable on single digest lines.
 
 Known limit: the number check accepts any number found in a line's sources, so a line citing the whole table can state a points gap that happens to equal some other value in the table. The faithfulness judge is there for that.
 
 ## MCP server
 
 `mcp_server/` is an own Premier League MCP server on the MCP Python SDK 2.x (`MCPServer`, the 2.x name of FastMCP). See [ADR 0004](docs/adr/0004-own-mcp-server.md) and [ADR 0010](docs/adr/0010-chat-as-mcp-client.md).
+
+### Tools, resources and prompts, in plain words
+
+MCP (Model Context Protocol) is a standard plug that lets an AI app use outside data and actions. A server offers three kinds of things. They differ in **who decides to use them**:
+
+| | What it is | Who picks it | Everyday comparison |
+|---|---|---|---|
+| **Tool** | an action the model can call with arguments, getting a result back | **the model**, in the middle of answering | a colleague looking something up while you wait |
+| **Resource** | a piece of read-only data with an address, like a file | **the app or the user**, attaching it as context before asking | handing someone a printout |
+| **Prompt** | a ready-made question template with blanks to fill | **the user**, from a menu (often a `/` command) | a form with the right questions already on it |
+
+### Why ours are what they are
+
+**Tools: everything that needs a question to answer.** A table position, the next fixture, a player's goals or the news about an injury all depend on what was asked and when. So the model decides which one to call and with which club, player or matchweek. These are the same twelve tools the chat app uses (listed under [Tools](#tools)). Each returns raw facts with `source_id`s to cite, and never a finished sentence, so whoever calls them can check every number.
+
+**Resources: the things worth attaching as they are.**
+- `table://current` is the current league table, for when you want the whole thing in front of the model.
+- `digest://matchweek/latest` and `digest://news/latest` are the newest weekly summaries.
+
+These need no arguments and change only when the data is refreshed, so they fit "read-only data you attach" better than "an action the model takes". The same data is still reachable as tools (`get_league_table`, `get_weekly_digest`) for when the model itself decides it needs it.
+
+**Prompts: two multi-step jobs that are easy to ask badly.**
+- `matchweek_preview(club)` says which tools to combine for a preview: form and next fixture, this season's meetings, team news.
+- `explain_table_move(club)` combines the recap's table moves, the latest result and the news.
+
+Both say to cite every fact. A user picks one and fills in the club, and gets a well-formed request without knowing the tool names.
+
+### How it is built
 
 | | |
 |---|---|
@@ -180,13 +241,13 @@ Known limit: the number check accepts any number found in a line's sources, so a
 
 **The chatbot is an MCP client.** `mcp_server/client.py` (`McpTools`) keeps one MCP session open on a background event loop and gives the synchronous chat loop `specs()` and `call(name, args)`. By default the API and the terminal chat run the server in-process: real MCP messages over memory streams, with no second process to start. `MCP_URL` points them at a running HTTP server instead, and `TOOL_TRANSPORT=direct` skips MCP altogether. The eval runner goes through MCP too, with an in-process server built around each case's context (its eval date and shield), so the evals measure what users get.
 
-**In other hosts.** `.vscode/mcp.json` registers the server for VS Code. For Claude Desktop, add to `claude_desktop_config.json`:
+**In other hosts.** For Claude Desktop, open Settings > Developer > Edit config. That is the file Desktop actually reads, which for the Microsoft Store install differs from the documented `%APPDATA%` path. Add this inside `mcpServers`:
 
 ```json
-{"mcpServers": {"premier-league": {"command": "C:\\path\\to\\python.exe", "args": ["-m", "mcp_server"]}}}
+"premier-league": {"command": "C:\\path\\to\\python.exe", "args": ["-m", "mcp_server"]}
 ```
 
-The server reads the repo's `.env` wherever it is started, so the host needs no environment of its own.
+The server reads the repo's `.env` wherever it is started, so the host needs no working folder or environment of its own. Desktop has its own web search and sports widgets, so name the server in the question ("Use the premier-league tools: ..."). For Claude Code: `claude mcp add --scope local premier-league -- <python> -m mcp_server`. `.vscode/mcp.json` registers the server for VS Code with `python`. On Windows, where `python` may be the Microsoft Store shortcut, change it to the full path. Screenshots of all three: [docs/showcase/](docs/showcase/).
 
 ## Evaluation
 
@@ -227,7 +288,7 @@ FastAPI, `backend/api/main.py`, run with `uvicorn backend.api.main:create_app --
 |---|---|
 | `POST /api/chat` | `{conversation_id, messages}` (at most 20 messages, the last a user message of at most 1000 characters). Streams server-sent events. 20 requests a minute per client. |
 | `POST /api/feedback` | `{turn_id, rating: up\|down, comment?}`; copies the question, answer, tools and prompt version next to the rating. |
-| `GET /api/health` | `ok`, `degraded` (newest article older than 7 days) or `down`, with the newest article, the newest finished match, the table's matchweek and the indexed chunk count. |
+| `GET /api/health` | `ok`, `degraded` (a freshness check warns or fails, see AI Ops) or `down`, with each check, the newest article, the newest finished match, the completed matchweek and the indexed chunk count. |
 | `GET /api/suggestions` | Starter questions built from current data (top scorer, next big fixture, a recent upset). |
 
 SSE events, in order: `meta {turn_id}`, then any number of `tool_call {name, status: started|finished, error?}` and `token {text}`, then `message {turn_id, answer, sources, widgets, prompt_version}`, `usage {prompt_tokens, completion_tokens, cost_usd, latency_ms}`. A failure ends the stream with `error {message}` instead. The chat runs in a worker thread that feeds a queue, so the synchronous psycopg and OpenAI calls do not block the event loop.
@@ -254,12 +315,10 @@ Every turn is stored in `chat_turns` (question, answer, tools, sources, prompt v
   ```
 
   Digest runs (`digest:recap`, `digest:news`) and eval cases are traced the same way; eval traces use the `eval` environment, are tagged with the run, and carry each check as a score. `chat_turns.trace_id` links a stored turn to its trace, and feedback becomes a `user_feedback` score on it. Without `LANGFUSE_*` keys nothing is sent.
-- **Freshness** (`backend/observability/freshness.py`): ingestion age, results missing after a fetch, table older than the latest result, newest article, unindexed articles, missing digests. Shown in `/api/health` and the header badge; stored after each scheduled ingestion.
+- **Freshness** (`backend/observability/freshness.py`): ingestion age, results missing after a fetch, a table that misses finished matches, newest article, unindexed articles, missing digests. Shown in `/api/health` and the header badge; stored after each scheduled ingestion.
 - **Dashboard** (`backend/observability/dashboard.py`): `ops.html` on the Pages site, rendered with every publish: spend per day and per area (chat, evals, digests, MCP clients, index), answer time, thumbs-up rate, eval runs (`eval_runs`, written by `evals/run.py`), freshness. Totals only.
 - **Feedback loop** (`evals/feedback.py`): `review` writes unreviewed thumbs-downs with tools, comment and trace link to `logs/`; `promote` turns one into a case in `feedback_v1.jsonl`; `dismiss` closes it.
 - **Eval gate** (`.github/workflows/eval-gate.yml`): started by hand (Actions > Eval gate > Run workflow) for a branch that changes llm, rag, prompts, tools, evals, digests or the MCP server, it ingests the season into a throwaway Postgres, builds the index and runs the full chat_v1 set (about $0.90 per run, so it never starts on its own) against `evals/thresholds.yaml`; the 25-case smoke subset was too small for those minimums (1 to 4 cases per evaluator). Skips with a warning when the Azure secrets are not set.
-
-The official table is stored under the matchweek active when it was fetched. `get_league_table` therefore reports the last *completed* matchweek (`backend/season.py`, shared with the system prompt and the recap) and, mid-matchweek, `matchweek_in_progress` with how many of its games are in.
 
 ## Frontend
 
@@ -267,7 +326,7 @@ React 19, Vite, TypeScript, Tailwind v4 and shadcn components in `frontend/`. It
 
 - **Chat:** streams tokens as they arrive and shows each tool call as a step ("Fetching the line-ups"). Raw markers are hidden while streaming; the final `message` replaces the text with the renumbered answer, whose `[n]` link to source cards (title, kind, date) under it. A small renderer handles the Markdown the prompt allows (paragraphs, lists, bold), so no HTML from the model is ever injected.
 - **Widgets:** league table with zones, match list (kick-offs in the browser's time zone), line-up pitch drawn from each starter's formation `row` (1 is the goalkeeper), player stat card, leaderboard. No club crests or league branding.
-- **Around it:** suggested questions on the empty state, thumbs up or down with an optional comment, new chat, stop, a header badge with data freshness from `/api/health`, and a "This week" page that the digests fill in Phase 5.
+- **Around it:** suggested questions on the empty state, thumbs up or down with an optional comment, new chat, stop, a header badge with data freshness from `/api/health`, and a "This week" page with the latest weekly summaries.
 - **Tests:** vitest and Testing Library (citation rendering, marker stripping, SSE parsing, the line-up pitch); oxlint; both run in CI next to the Python job.
 
 ## Trade-offs

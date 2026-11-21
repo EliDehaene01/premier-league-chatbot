@@ -4,7 +4,7 @@ Project memory for Claude Code. Keep it short: `README.md` says what this is, `A
 
 ## What this is
 
-A local chatbot about the current Premier League season (2026-27, season id 2026). Stats come from tool calls on structured data in Postgres; news comes from RAG over official premierleague.com articles. Azure OpenAI via Microsoft Foundry is the model layer. Weekly digests are published to GitHub Pages, and an own MCP server exposes the tools.
+A local chatbot about the current Premier League season (2026-27, season id 2026). Stats come from tool calls on structured data in Postgres; news comes from RAG over official premierleague.com articles. Azure OpenAI via Microsoft Foundry is the model layer. Weekly digests, a showcase and the AI Ops dashboard are published to GitHub Pages, and an own MCP server exposes the tools.
 
 ## Hard constraints - do not violate
 
@@ -52,7 +52,7 @@ docs/         # data_sources.md, adr/
 - MCP server: `python -m mcp_server` (stdio) or `--http`; the chat uses it in-process unless `TOOL_TRANSPORT=direct`
 - Tools are defined once in `backend/tools`; the MCP server serves those schemas unchanged. Add a tool there, never only in `mcp_server`.
 - AI Ops: Langfuse `docker compose -f docker-compose.langfuse.yml up -d` (secrets via `python scripts/langfuse_env.py`); freshness `python -m backend.observability.freshness`; feedback loop `python -m evals.feedback review|promote|dismiss`. Tracing goes through `backend/observability/tracing.py` only, and must never break an answer. Tests blank the `LANGFUSE_*` settings.
-- Evals: `python -m evals.run --dataset chat_v1` (full, about $1) or `--subset smoke`; needs `pip install -e .[eval]`. Never lower `evals/thresholds.yaml` to get green.
+- Evals: `python -m evals.run --dataset chat_v1` (full, about $0.90) or `--subset smoke`; needs `pip install -e .[eval]`. Never lower `evals/thresholds.yaml` to get green. Every eval run costs Azure credit: run one only when asked; the GitHub eval gate starts by hand only.
 
 ## Current phase
 
@@ -62,4 +62,5 @@ docs/         # data_sources.md, adr/
 - [x] 3 Evals dataset (chat_v1, evaluators, runner, thresholds)
 - [x] 4 API + React UI + structured citations
 - [x] 5 Weekly digests + own MCP server. Mon 23:30 UTC ingest, Tue 05:00 UTC matchweek recap; Thu 23:00 UTC ingest, Fri 05:00 UTC news highlights; summaries published to GitHub Pages
-- [ ] 6 AI Ops: Langfuse tracing, CI eval gate, cost and latency dashboard, feedback loop
+- [x] 6 AI Ops: Langfuse tracing, eval gate (manual, about $0.90 a run), cost and latency dashboard on Pages, feedback loop
+- [x] 7 Clean-up: README getting-started guide for non-programmers, decisions table and MCP explainer in ARCHITECTURE.md, secret scan

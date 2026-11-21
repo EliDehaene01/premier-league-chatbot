@@ -26,6 +26,39 @@ RECAP_PROMPT, LABEL_PROMPT, STORY_PROMPT, NEWS_PROMPT = (
     "digest_story_v1",
     "digest_news_v1",
 )
+# table-zone claims the model gets wrong when it misreads previous_position -> position; each
+# is checked against what code computed for the matchweek (recap.gather's table facts)
+ZONE_CLAIMS = [
+    (
+        "left_bottom3",
+        r"\b(left|out of|escaped?|climb\w* out of|moved out of|lifted \w+ out of)\b"
+        r"[^.;]{0,20}\b(bottom (three|3)|relegation zone)",
+    ),
+    (
+        "entered_bottom3",
+        r"\b(into|entered|enters?|dropped into|fell into|slipped into|sank into)"
+        r"\b[^.;]{0,12}\b(bottom (three|3)|relegation zone)",
+    ),
+    (
+        "left_top4",
+        r"\b(out of|dropped out of|fell out of|left|slipped out of)\b[^.;]{0,12}"
+        r"\btop (four|4)\b",
+    ),
+    (
+        "entered_top4",
+        r"\b(into|entered|enters?|crack\w*|broke into|moved into|climbed into)\b"
+        r"[^.;]{0,12}\btop (four|4)\b",
+    ),
+    ("stayed_bottom", r"\b(stay\w*|remain\w*|still)\b[^.;]{0,12}\bbottom\b(?! (three|3|half))"),
+    ("went_bottom", r"\b(dropped|fell|slipped|sank|went) to (the )?bottom\b(?! (three|3|half))"),
+]
+ZONE_RES = [(k, re.compile(p, re.I)) for k, p in ZONE_CLAIMS]
+EXTRA_ALIASES = {
+    "Manchester United": ["Man United"],
+    "Tottenham Hotspur": ["Tottenham"],
+    "Brighton and Hove Albion": ["Brighton & Hove Albion"],
+    "Nottingham Forest": ["Nottm Forest"],
+}
 SCORE = re.compile(r"(?<![\d-])(\d{1,2})-(\d{1,2})(?![\d-])")
 TEXT_PER_ARTICLE = 3000
 
@@ -120,6 +153,39 @@ def check_cited(
         drops.append({"where": where, "text": text, "reason": reason})
         return None
     return {"text": text, "sources": sources}
+
+
+def club_aliases(conn) -> dict[str, list[str]]:
+    rows = conn.execute("SELECT name, short_name FROM silver.clubs").fetchall()
+    return {n: [n, *([sn] if sn else []), *EXTRA_ALIASES.get(n, [])] for n, sn in rows}
+
+
+def zone_claim_error(text: str, table: dict, aliases: dict[str, list[str]]) -> str | None:
+    """A claim that a club entered, left or stayed in a table zone must name a club that did."""
+    rows = table.get("rows", [])
+    if not rows:
+        return None
+    last = max(r["position"] for r in rows)
+    allowed = {
+        "left_bottom3": table.get("left_bottom3", []),
+        "entered_bottom3": table.get("entered_bottom3", []),
+        "left_top4": table.get("left_top4", []),
+        "entered_top4": table.get("entered_top4", []),
+        "stayed_bottom": [
+            r["club"] for r in rows if r["position"] == last and r.get("previous_position") == last
+        ],
+        "went_bottom": [
+            r["club"] for r in rows if r["position"] == last and r.get("previous_position") != last
+        ],
+    }
+
+    def named(club: str) -> bool:
+        return any(re.search(rf"\b{re.escape(a)}\b", text, re.I) for a in aliases.get(club, [club]))
+
+    for kind, pattern in ZONE_RES:
+        if pattern.search(text) and not any(named(c) for c in allowed[kind]):
+            return f"table claim '{kind}' names none of {allowed[kind] or 'no club'}"
+    return None
 
 
 def number_sources(conn, items: list[dict]) -> tuple[list[dict], dict[str, int]]:
@@ -222,23 +288,34 @@ def write_recap(
     prompt = load_named(RECAP_PROMPT, season=facts["season"], matchweek=facts["matchweek"])
     index = recap_index(facts)
     base = {str(facts["matchweek"])} | numbers_in_data(facts["highlights"])
+    aliases = club_aliases(conn)
+
+    def check(item: dict, drops: list[dict], where: str) -> dict | None:
+        kept = check_cited(item, index, base, drops, where)
+        if kept and (why := zone_claim_error(kept["text"], facts["table"], aliases)):
+            drops.append({"where": where, "text": kept["text"], "reason": why})
+            return None
+        return kept
+
     best = None
     for _attempt in range(2):  # one retry when the validator drops anything
         raw = w.ask(prompt, facts, "matchweek_recap", RECAP_SCHEMA)
         drops: list[dict] = []
-        intro = check_cited(raw["intro"], index, base, drops, "intro")
+        intro = check(raw["intro"], drops, "intro")
         sections = []
         for s in raw.get("sections", []):
             bullets = [
                 b
                 for i, x in enumerate(s.get("bullets", []))
-                if (b := check_cited(x, index, base, drops, f"{s.get('title')}[{i}]"))
+                if (b := check(x, drops, f"{s.get('title')}[{i}]"))
             ]
             if bullets:
                 sections.append({"title": s.get("title", "").strip(), "bullets": bullets})
         headline = raw.get("headline", "").strip()[:120]
-        if not headline or numbers(headline) - numbers_in_data(facts):
-            drops.append({"where": "headline", "text": headline, "reason": "ungrounded number"})
+        bad_zone = zone_claim_error(headline, facts["table"], aliases) if headline else None
+        if not headline or numbers(headline) - numbers_in_data(facts) or bad_zone:
+            reason = bad_zone or "ungrounded number"
+            drops.append({"where": "headline", "text": headline, "reason": reason})
             headline = f"Matchweek {facts['matchweek']} recap"
         candidate = {"headline": headline, "intro": intro, "sections": sections, "drops": drops}
         if best is None or len(drops) < len(best["drops"]):

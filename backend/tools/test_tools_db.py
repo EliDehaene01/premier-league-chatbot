@@ -34,6 +34,9 @@ def test_league_table(ctx):
     assert [(r["position"], r["club"], r["points"]) for r in out["table"]] == [
         (1, "Arsenal", 3), (2, "Coventry City", 0),
     ]  # fmt: skip
+    assert out["leader"] == {"position": 1, "club": "Arsenal", "points": 3}
+    assert [r["club"] for r in out["top_four"]] == ["Arsenal", "Coventry City"]
+    assert out["relegation_zone"] == []  # a two-club table has no 18th place
     assert run_tool(ctx, "get_league_table", {"as_of_matchweek": 7})["available_matchweeks"] == [1]
 
 
@@ -57,7 +60,9 @@ def test_fixtures_and_results(ctx):
     assert (fixture["home_club"], fixture["away_club"]) == ("Coventry City", "Arsenal")
     (result,) = run_tool(ctx, "get_results", {"club": "COV"})["results"]
     assert (result["home_score"], result["away_score"]) == (3, 0)
-    assert run_tool(ctx, "get_results", {"matchweek": 2})["results"] == []
+    assert run_tool(ctx, "get_results", {"matchweek": 2})["total_goals"] == 0
+    assert run_tool(ctx, "get_results", {"matchweek": 1})["total_goals"] == 3
+    assert "total_goals" not in run_tool(ctx, "get_results", {"club": "ARS"})
     assert "error" in run_tool(ctx, "get_results", {"club": "Wolves"})
 
 
@@ -86,6 +91,7 @@ def test_club_info_and_head_to_head(ctx):
     assert {"won", "drawn", "lost", "goals_for", "goals_against"} <= info["table"].keys()
     assert info["form_last5_oldest_first"]["form"] == "W" and info["squad_size"] == 1
     assert info["next_fixture"]["home_club"] == "Coventry City"
+    assert info["next_home_fixture"] is None  # Arsenal's only fixture is away
     assert (
         len(run_tool(ctx, "get_head_to_head", {"club_a": "ARS", "club_b": "COV"})["matches"]) == 2
     )

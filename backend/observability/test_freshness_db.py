@@ -15,6 +15,10 @@ pytestmark = pytest.mark.db
 def conn(db):
     fill_bronze(db)
     load_from_bronze(db)
+    # the sample fixture's real kickoff date passes with the calendar; keep it ahead of the fetch
+    db.execute(
+        "UPDATE silver.matches SET kickoff_utc = now() + interval '30 days' WHERE NOT is_finished"
+    )
     return db
 
 
@@ -56,3 +60,14 @@ def test_store_keeps_history(conn):
     freshness.store(conn, freshness.run_checks(conn))
     n = conn.execute("SELECT count(DISTINCT name) FROM public.freshness_checks").fetchone()[0]
     assert n == len(freshness.CHECKS)
+
+
+def test_table_missing_a_finished_match(conn):
+    assert by_name(freshness.run_checks(conn))["table"].status == "ok"
+    conn.execute(
+        "INSERT INTO silver.matches (match_id, season, matchweek, kickoff_utc, home_club_id, "
+        "away_club_id, period, home_score, away_score) SELECT 1, season, matchweek, "
+        "kickoff_utc, away_club_id, home_club_id, 'FullTime', 1, 0 FROM silver.matches LIMIT 1"
+    )
+    check = by_name(freshness.run_checks(conn))["table"]
+    assert check.status == "warn" and check.data["missing_results"] == 1

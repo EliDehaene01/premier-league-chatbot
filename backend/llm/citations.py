@@ -22,8 +22,9 @@ ANY_MARKER = re.compile(r"\[\s*([a-z]\d[\w-]*(?:\s*[,;]\s*[a-z]\d[\w-]*)*)\s*\]"
 RETURNED_ID = re.compile(rf'"source_id":\s*"({SOURCE_ID})"')
 MD_LINK = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 BARE_URL = re.compile(r"\s*\(?<?https?://[^\s)>]*[^\s)>.,;:!?]>?\)?")
-SOURCES_SECTION = re.compile(r"\n+\s*(?:\*\*|#+\s*)?Sources?\s*:?(?:\*\*)?\s*:?\s*\n.*\Z",
-                             re.IGNORECASE | re.DOTALL)  # fmt: skip
+SOURCES_SECTION = re.compile(
+    r"\n+\s*(?:\*\*|#+\s*)?Sources?\s*:?(?:\*\*)?\s*:?\s*\n.*\Z", re.IGNORECASE | re.DOTALL
+)
 
 
 def returned_ids(messages: list[dict]) -> set[str]:
@@ -42,8 +43,11 @@ def slug(name: str) -> str:
 def resolve(conn: psycopg.Connection, source_id: str) -> dict | None:
     kind, key = source_id[0], source_id[1:]
     if kind == "a":
-        row = conn.execute("SELECT title, published_at::date, canonical_url FROM silver.articles "
-                           "WHERE content_id = %s", (int(key),)).fetchone()  # fmt: skip
+        row = conn.execute(
+            "SELECT title, published_at::date, canonical_url FROM silver.articles "
+            "WHERE content_id = %s",
+            (int(key),),
+        ).fetchone()
         return row and {"kind": "article", "title": row[0], "date": str(row[1]), "url": row[2]}
     if kind == "m":
         row = conn.execute(
@@ -53,21 +57,47 @@ def resolve(conn: psycopg.Connection, source_id: str) -> dict | None:
         ).fetchone()
         if not row:
             return None
-        title = (f"{row[0]} {row[2]}-{row[3]} {row[1]}" if row[4] == "FullTime"
-                 else f"{row[0]} v {row[1]}")  # fmt: skip
-        return {"kind": "match", "title": title, "date": str(row[5]),
-                "url": MATCH_URL.format(id=key)}  # fmt: skip
-    if kind == "t":
-        return {"kind": "table", "title": f"Premier League table after matchweek {key}",
-                "date": None, "url": TABLE_URL}  # fmt: skip
+        title = (
+            f"{row[0]} {row[2]}-{row[3]} {row[1]}"
+            if row[4] == "FullTime"
+            else f"{row[0]} v {row[1]}"
+        )
+        return {
+            "kind": "match",
+            "title": title,
+            "date": str(row[5]),
+            "url": MATCH_URL.format(id=key),
+        }
+    if kind == "t":  # stored under the active matchweek, so dated rather than "after mw N"
+        row = conn.execute(
+            "SELECT max(fetched_at)::date FROM silver.standings_snapshots WHERE matchweek = %s",
+            (int(key),),
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        return {
+            "kind": "table",
+            "title": "Premier League table",
+            "date": str(row[0]),
+            "url": TABLE_URL,
+        }
     if kind == "s":
-        return {"kind": "table", "title": "Premier League player stats", "date": key,
-                "url": STATS_URL}  # fmt: skip
+        return {
+            "kind": "table",
+            "title": "Premier League player stats",
+            "date": key,
+            "url": STATS_URL,
+        }
     if kind == "c":
-        row = conn.execute("SELECT name FROM silver.clubs WHERE club_id = %s",
-                           (int(key),)).fetchone()  # fmt: skip
-        return row and {"kind": "club", "title": f"{row[0]} club profile", "date": None,
-                        "url": CLUB_URL.format(id=key, slug=slug(row[0]))}  # fmt: skip
+        row = conn.execute(
+            "SELECT name FROM silver.clubs WHERE club_id = %s", (int(key),)
+        ).fetchone()
+        return row and {
+            "kind": "club",
+            "title": f"{row[0]} club profile",
+            "date": None,
+            "url": CLUB_URL.format(id=key, slug=slug(row[0])),
+        }
     return None
 
 

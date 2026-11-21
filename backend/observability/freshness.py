@@ -77,16 +77,25 @@ def results(conn, now: datetime) -> Check:
 
 
 def table(conn, now: datetime) -> Check:
+    """The newest table must count every finished match: each one adds a game played for two
+    clubs. (Comparing fetch time with kickoff time warned on tables fetched minutes after a
+    final whistle.)"""
     row = _one(
         conn,
         "SELECT (SELECT max(fetched_at) FROM silver.standings_snapshots) AS table_at, "
-        "(SELECT max(kickoff_utc) FROM silver.matches WHERE is_finished) AS last_result",
+        "(SELECT sum(played) FROM silver.standings_snapshots WHERE matchweek = "
+        "(SELECT max(matchweek) FROM silver.standings_snapshots)) AS games_in_table, "
+        "(SELECT count(*) FROM silver.matches WHERE is_finished "
+        "AND season = (SELECT max(season) FROM silver.matches)) AS finished",
     )
-    stale = row["table_at"] is None or (
-        row["last_result"] is not None and row["table_at"] < row["last_result"] + RESULT_GRACE
-    )
-    detail = "older than the latest result" if stale else f"fetched {_age(now, row['table_at'])}"
-    return Check("table", "warn" if stale else "ok", f"league table {detail}", row)
+    missing = (row["finished"] or 0) - (row["games_in_table"] or 0) // 2
+    if row["table_at"] is None:
+        status, detail = "warn", "no league table stored"
+    elif missing > 0:
+        status, detail = "warn", f"league table is missing {missing} finished match(es)"
+    else:
+        status, detail = "ok", f"league table fetched {_age(now, row['table_at'])}"
+    return Check("table", status, detail, {**row, "missing_results": max(missing, 0)})
 
 
 def news(conn, now: datetime) -> Check:

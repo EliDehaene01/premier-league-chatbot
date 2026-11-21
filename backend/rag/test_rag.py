@@ -80,6 +80,23 @@ def test_shields_fail_closed():
     assert shield(CHUNKS, "q", CFG, httpx.Client()).safe == []
 
 
+@respx.mock
+def test_shields_wait_out_a_rate_limit_then_fail_closed(monkeypatch):
+    waits = []
+    monkeypatch.setattr("backend.rag.shields.sleep", waits.append)
+    ok = {"documentsAnalysis": [{"attackDetected": False}, {"attackDetected": False}]}
+    route = respx.post(URL)
+    route.side_effect = [
+        httpx.Response(429, headers={"Retry-After": "1"}),
+        httpx.Response(200, json=ok),
+    ]
+    assert len(shield(CHUNKS, "q", CFG, httpx.Client()).safe) == 2 and waits == [1.0]
+    route.side_effect = None
+    route.respond(429, headers={"Retry-After": "1"})  # never lets up: nothing gets through
+    r = shield(CHUNKS, "q", CFG, httpx.Client())
+    assert r.safe == [] and r.error and len(waits) == 1 + 3
+
+
 def test_shield_batches_respect_service_limits():
     small = [{"text": "x" * 100}] * 12
     assert [len(b) for b in _batches(small)] == [5, 5, 2]  # at most 5 documents per call

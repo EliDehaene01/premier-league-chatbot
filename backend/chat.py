@@ -3,16 +3,19 @@
 import argparse
 import sys
 
+from backend.config import settings
 from backend.db import get_connection, init_db
 from backend.llm.client import chat
 from backend.llm.providers import AzureOpenAIProvider
 from backend.tools import ToolContext
+from mcp_server.client import from_settings
 
 
 def show(turn) -> None:
+    via = "mcp" if settings.tool_transport != "direct" else "direct"
     for c in turn.tool_calls:
         err = f"  error: {c['error']}" if "error" in c else ""
-        print(f"  [tool] {c['name']}({c['arguments']}){err}")
+        print(f"  [tool via {via}] {c['name']}({c['arguments']}){err}")
     print(f"\n{turn.answer}\n")
     for s in turn.sources:
         print(f"  [source] {s['title']} ({s['date']}) {s['url']}")
@@ -30,6 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     conn = get_connection()
     init_db(conn)
     provider = AzureOpenAIProvider(conn)
+    tools = from_settings()  # the Premier League MCP server, unless TOOL_TRANSPORT=direct
     messages: list[dict] = []
     while True:
         if args.ask:
@@ -43,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
             if question in ("", "exit", "quit"):
                 return 0
         messages.append({"role": "user", "content": question})
-        turn = chat(messages, ToolContext(conn, provider))
+        turn = chat(messages, ToolContext(conn, provider, tools=tools))
         messages = turn.messages
         show(turn)
         if args.ask:

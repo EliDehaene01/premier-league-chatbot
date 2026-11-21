@@ -59,6 +59,15 @@ python -m evals.digests                  # digest evals on past weeks
 
 The scheduled runs (`scripts/schedule_windows.ps1`) write and publish them on Tuesday and Friday mornings. GitHub Pages serves the `gh-pages` branch (Settings > Pages > Deploy from a branch).
 
+## MCP server
+
+```bash
+python -m mcp_server            # stdio, for Claude Desktop and VS Code (.vscode/mcp.json)
+python -m mcp_server --http     # Streamable HTTP on http://127.0.0.1:8765/mcp
+```
+
+The chatbot itself reaches its tools through this server (in-process by default; set `MCP_URL` to use a running one, or `TOOL_TRANSPORT=direct` to skip MCP). Claude Desktop setup: see ARCHITECTURE.md, MCP server.
+
 ## Evals
 
 ```bash

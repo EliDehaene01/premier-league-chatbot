@@ -14,7 +14,7 @@ import uuid
 from collections import defaultdict, deque
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 import psycopg
 from fastapi import FastAPI, HTTPException, Request
@@ -125,7 +125,14 @@ def suggestions(conn: psycopg.Connection) -> list[str]:
 def create_app(
     connect: Callable[[], psycopg.Connection] = get_connection,
     make_provider: Callable[[psycopg.Connection], LLMProvider] | None = None,
+    tools: Any = "settings",
 ) -> FastAPI:
+    """tools: the chat's tool backend, an MCP client shared by all requests (see
+    mcp_server/client.py); "settings" builds one from TOOL_TRANSPORT, None calls tools directly."""
+    if tools == "settings":
+        from mcp_server.client import from_settings
+
+        tools = from_settings()
     make_provider = make_provider or (lambda conn: AzureOpenAIProvider(
         conn, purpose_prefix="api:"))  # fmt: skip
     app = FastAPI(title="Premier League chatbot")
@@ -166,7 +173,8 @@ def create_app(
             conn = connect()
             try:
                 provider = make_provider(conn)
-                turn = chat([m.model_dump() for m in req.messages], ToolContext(conn, provider),
+                ctx = ToolContext(conn, provider, tools=tools)
+                turn = chat([m.model_dump() for m in req.messages], ctx,
                             emit=lambda e, d: events.put((e, d)))  # fmt: skip
                 latency = int((time.monotonic() - started) * 1000)
                 usage = getattr(provider, "usage", None) or {}

@@ -60,7 +60,8 @@ def chat(
 
     for round_no in range(max_rounds + 1):
         # after max_rounds of tool use, ask for an answer with what it has
-        tools = TOOL_SPECS if round_no < max_rounds else None
+        specs = ctx.tools.specs() if ctx.tools else TOOL_SPECS  # MCP server, or direct calls
+        tools = specs if round_no < max_rounds else None
         if stream:
 
             def on_delta(text: str) -> None:
@@ -83,7 +84,8 @@ def chat(
                                    "status": "started"})  # fmt: skip
             try:
                 args = json.loads(call.arguments or "{}")
-                output = run_tool(ctx, call.name, args)
+                output = (ctx.tools.call(call.name, args) if ctx.tools
+                          else run_tool(ctx, call.name, args))  # fmt: skip
             except Exception as e:  # the model sees the error and can recover or explain
                 args, output = {}, {"error": f"{type(e).__name__}: {e}"}
             if isinstance(output, dict) and "error" in output:

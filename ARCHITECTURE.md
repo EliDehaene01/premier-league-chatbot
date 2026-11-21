@@ -167,7 +167,26 @@ Known limit: the number check accepts any number found in a line's sources, so a
 
 ## MCP server
 
-An own Premier League MCP server (FastMCP) exposing the same tools. See [ADR 0004](docs/adr/0004-own-mcp-server.md). *Phase 5.*
+`mcp_server/` is an own Premier League MCP server on the MCP Python SDK 2.x (`MCPServer`, the 2.x name of FastMCP). See [ADR 0004](docs/adr/0004-own-mcp-server.md) and [ADR 0010](docs/adr/0010-chat-as-mcp-client.md).
+
+| | |
+|---|---|
+| Tools | all chat tools (`get_league_table`, `get_fixtures`, `get_results`, `get_match_details`, `get_match_lineup`, `get_top_scorers`, `get_player_stats`, `compare_players`, `get_club_info`, `get_head_to_head`, `get_weekly_digest`, `search_news`) |
+| Resources | `digest://matchweek/latest`, `digest://news/latest`, `table://current` (JSON) |
+| Prompts | `matchweek_preview(club)`, `explain_table_move(club)` |
+| Transports | stdio (`python -m mcp_server`, for Claude Desktop and VS Code) and Streamable HTTP (`python -m mcp_server --http`, port 8765, localhost only) |
+
+**One tool layer.** The server overrides `list_tools` and `call_tool` to serve `backend.tools.TOOL_SPECS` and `run_tool` as they are, instead of re-deriving schemas from Python signatures, so the schemas the model sees are identical whether it calls tools directly or over MCP (a test asserts this). Results go out both as JSON text and as structured content; a tool's `{"error": ...}` sets `isError`. Each call runs in a worker thread with its own database connection; `search_news` still embeds through Azure OpenAI and passes Prompt Shields inside the server.
+
+**The chatbot is an MCP client.** `mcp_server/client.py` (`McpTools`) keeps one MCP session open on a background event loop and gives the synchronous chat loop `specs()` and `call(name, args)`. By default the API and the terminal chat run the server in-process: real MCP messages over memory streams, with no second process to start. `MCP_URL` points them at a running HTTP server instead, and `TOOL_TRANSPORT=direct` skips MCP altogether. The eval runner goes through MCP too, with an in-process server built around each case's context (its eval date and shield), so the evals measure what users get.
+
+**In other hosts.** `.vscode/mcp.json` registers the server for VS Code. For Claude Desktop, add to `claude_desktop_config.json`:
+
+```json
+{"mcpServers": {"premier-league": {"command": "C:\\path\\to\\python.exe", "args": ["-m", "mcp_server"]}}}
+```
+
+The server reads the repo's `.env` wherever it is started, so the host needs no environment of its own.
 
 ## Evaluation
 

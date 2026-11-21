@@ -30,6 +30,7 @@ class ToolContext:
     shield: Any = shields.shield  # swapped in tests
     sources: list[dict] = field(default_factory=list)  # articles returned by search_news
     fetch_lineups: Any = None  # match_id -> None; fetches into bronze/silver (None = live API)
+    tools: Any = None  # an MCP client (mcp_server.client.McpTools); None = call the tools directly
 
 
 def _rows(ctx: ToolContext, sql: str, params=()) -> list[dict]:
@@ -337,6 +338,25 @@ def search_news(ctx, query: str, club: str | None = None, days: int | None = Non
     return out
 
 
+def get_weekly_digest(ctx, kind: str = "matchweek_recap") -> dict:
+    """The newest stored weekly digest (written on Tuesday and Friday from the same data)."""
+    if kind not in ("matchweek_recap", "news_highlights"):
+        return {"error": "kind must be matchweek_recap or news_highlights"}
+    rows = _rows(ctx, "SELECT headline, period_key, created_at, content FROM digests "
+                      "WHERE kind = %s ORDER BY created_at DESC LIMIT 1", (kind,))  # fmt: skip
+    if not rows:
+        return {"error": f"no {kind.replace('_', ' ')} has been written yet"}
+    d = rows[0]
+    lines = []
+    for section in [{"title": "", "bullets": [d["content"]["intro"]]}] + d["content"]["sections"]:
+        for b in section["bullets"]:
+            if b:  # each line keeps the sources it was validated against, to cite as usual
+                lines.append({"section": section["title"], "text": b["text"],
+                              "sources": [{"source_id": s} for s in b["sources"]]})  # fmt: skip
+    return {"kind": kind, "period": d["period_key"], "headline": d["headline"],
+            "written_at": d["created_at"].isoformat(), "lines": lines}  # fmt: skip
+
+
 def _schema(name: str, description: str, properties: dict, required: tuple = ()) -> dict:
     return {"type": "function", "function": {"name": name, "description": description,
             "parameters": {"type": "object", "properties": properties,
@@ -386,6 +406,11 @@ TOOLS: dict[str, tuple[Any, dict]] = {
     "get_head_to_head": (get_head_to_head, _schema(
         "get_head_to_head", "This season's meetings between two clubs, played or scheduled.",
         {"club_a": CLUB, "club_b": CLUB}, ("club_a", "club_b"))),
+    "get_weekly_digest": (get_weekly_digest, _schema(
+        "get_weekly_digest", "The latest weekly digest: the Tuesday matchweek recap or the "
+        "Friday news highlights, each line with its sources. Use for 'what happened this week' "
+        "or 'sum up the weekend' questions.",
+        {"kind": {"type": "string", "enum": ["matchweek_recap", "news_highlights"]}})),
     "search_news": (search_news, _schema(
         "search_news",
         "Search official premierleague.com articles: news, injuries, quotes, previews, match "

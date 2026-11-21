@@ -18,7 +18,9 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
+import psycopg
 import yaml
+from psycopg.types.json import Jsonb
 
 from backend.config import settings
 from backend.db import get_connection
@@ -279,6 +281,37 @@ def below_thresholds(summary: dict, thresholds: dict) -> list[str]:
     return fails
 
 
+def record_run(meta: dict, summary: dict, passed: bool, make_conn=get_connection) -> bool:
+    """Keep the run's totals in eval_runs for the AI Ops dashboard. False if not stored."""
+    try:
+        with make_conn() as conn:
+            conn.execute(
+                "INSERT INTO public.eval_runs (run_at, dataset, subset, prompt_version, "
+                "chat_deployment, cases, pass_rate, cost_usd, judge_cost_usd, latency_p50_ms, "
+                "latency_p95_ms, passed_thresholds, summary) VALUES "
+                "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    datetime.strptime(meta["run_at"], "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC),
+                    meta["dataset"],
+                    meta["subset"],
+                    meta["prompt_version"],
+                    meta["chat_deployment"],
+                    summary["cases"],
+                    summary["pass_rate"],
+                    summary["cost_usd"],
+                    summary["judge_cost_usd"],
+                    summary["latency_ms"]["p50"],
+                    summary["latency_ms"]["p95"],
+                    passed,
+                    Jsonb(summary),
+                ),
+            )
+        return True
+    except psycopg.Error as e:  # the result file and report are still written
+        print(f"eval run not stored for the dashboard: {type(e).__name__}")
+        return False
+
+
 def _fmt(x):
     return "" if x is None else f"{x:.0%}"
 
@@ -433,6 +466,7 @@ def main(argv=None) -> int:
         "capped": capped,
     }
     data = {"meta": meta, "summary": summary, "results": results}
+    record_run(meta, summary, passed=not fails and not capped)
     out_file.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
     comparison = None
     if args.baseline:

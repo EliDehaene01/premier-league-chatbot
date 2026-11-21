@@ -226,6 +226,24 @@ CREATE TABLE IF NOT EXISTS public.freshness_checks (
     data       jsonb NOT NULL DEFAULT '{}'
 );
 
+-- one row per eval run (evals/run.py), for the AI Ops dashboard; raw results stay in files
+CREATE TABLE IF NOT EXISTS public.eval_runs (
+    id                bigserial PRIMARY KEY,
+    run_at            timestamptz NOT NULL,
+    dataset           text NOT NULL,
+    subset            text,
+    prompt_version    text,
+    chat_deployment   text,
+    cases             int NOT NULL,
+    pass_rate         numeric(4, 3) NOT NULL,
+    cost_usd          numeric(12, 6),
+    judge_cost_usd    numeric(12, 6),
+    latency_p50_ms    int,
+    latency_p95_ms    int,
+    passed_thresholds boolean NOT NULL,
+    summary           jsonb NOT NULL
+);
+
 -- Phase 6: the Langfuse trace of the turn, so feedback can be attached to it as a score
 ALTER TABLE public.chat_turns ADD COLUMN IF NOT EXISTS trace_id text;
 

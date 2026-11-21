@@ -4,9 +4,7 @@ Dataset `chat_v1`, prompt `v4`, chat model `gpt-5.4-mini`, judge `gpt-5.4-mini`.
 
 **165 cases, 86% passed. All thresholds met.**
 
-Cost: chat $0.7509, judges $0.1812 (total $0.93).
-
-This summary was written from the run's log, because the report artifact could not be downloaded at the time. The log has every case's pass or fail and failing checks, but not the per-evaluator scores, retrieval hit@5 and MRR, or latency. The gate passing means each of those was at or above its minimum in `evals/thresholds.yaml`. From now on the gate also prints the full report into its log.
+Cost: chat $0.7509, judges $0.1812 (total $0.93). Latency per case: p50 2774 ms, p95 6180 ms. Errors: 0.
 
 ## Per category
 
@@ -29,6 +27,21 @@ This summary was written from the run's log, because the report artifact could n
 | unanswerable | 6 | 100% | 100% |
 
 The previous column is the full v3 run (20261121T161838Z, 82%). The gate run between them (20261121T192347Z, 84%) failed only on ambiguity (4 of 6): "How is United doing?" and "What did City do last weekend?" picked one club without saying so. Prompt v4 fixes that by naming the short names that fit several clubs and asking for an explicit "Assuming you mean <full name>:".
+
+## Per evaluator
+
+| Evaluator | Applicable | Pass rate | Mean score | Minimum pass rate |
+|---|---|---|---|---|
+| citation | 38 | 84% | 0.91 | 0.60 |
+| citation_support | 26 | 73% | 0.73 | 0.40 |
+| exact_answer | 135 | 90% | 0.92 | 0.90 |
+| groundedness | 38 | 97% | 0.94 | 0.90 |
+| guardrail | 30 | 97% | 0.97 | 0.90 |
+| no_ungrounded_numbers | 92 | 100% | 1.00 | 0.95 |
+| retrieval | 26 | 92% | 0.86 | 0.90 |
+| tool_selection | 142 | 95% | 0.92 | 0.95 |
+
+Retrieval over the news cases: hit@5 0.92 (minimum 0.90), MRR 0.86 (minimum 0.80).
 
 ## Failing cases (24)
 

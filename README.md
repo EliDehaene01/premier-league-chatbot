@@ -10,18 +10,30 @@ Requires Python 3.12 and Docker.
 
 ```bash
 cp .env.example .env          # then set POSTGRES_PASSWORD
-docker compose up -d          # Postgres 16 + pgvector, schemas bronze/silver/gold
+docker compose up -d          # Postgres 16 + pgvector on host port 5433
 pip install -e ".[dev]"
-pytest -m "not live"          # PLC_LIVE_TESTS=1 pytest -m live hits the real APIs
+pytest -m "not live"          # unit + db tests; PLC_LIVE_TESTS=1 pytest -m live hits the real APIs
+python -m ingestion backfill --season 2026   # first load, about 3 minutes
 ```
+
+## Ingestion
+
+```bash
+python -m ingestion backfill --season 2026   # everything so far this season, articles since 2026-08-01
+python -m ingestion matchweek                # latest finished matchweek + articles since last run
+python -m ingestion news                     # articles since last run
+python -m ingestion rebuild                  # rebuild silver from bronze, no network
+```
+
+Each mode ends with data-quality checks and exits non-zero if one fails; `--summary out.json` writes a run summary. To schedule the weekly runs on Windows, run `scripts/schedule_windows.ps1` once. Schema: [docs/ingestion_schema.md](docs/ingestion_schema.md).
 
 ## Status
 
 | Phase | What | Status |
 |---|---|---|
 | 0 | Setup and data source spike | done |
-| 1 | Ingestion: bronze / silver / gold | next |
-| 2 | RAG + tools + chat loop | |
+| 1 | Ingestion: bronze / silver / gold | done |
+| 2 | RAG + tools + chat loop | next |
 | 3 | Evals dataset | |
 | 4 | API + React UI | |
 | 5 | Weekly digests (GitHub Pages) + own MCP server | |

@@ -1,0 +1,38 @@
+# Smoke test of the live sources. The real database is local-only (see ARCHITECTURE.md,
+# Scheduling), so this runs the matchweek ingestion against a throwaway Postgres.
+name: Ingest smoke test (matchweek)
+
+on:
+  schedule:
+    - cron: "30 23 * * 1"  # Monday 23:30 UTC
+  workflow_dispatch:
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: plc
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: plc
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U plc" --health-interval 5s --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://plc:ci-only@localhost:5432/plc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - run: python -m ingestion matchweek --summary summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ingest-matchweek-summary
+          path: summary.json

@@ -9,6 +9,7 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "python-dotenv>=1.0",
+    "tzdata>=2024.1",  # zoneinfo data on Windows
 ]
 
 [project.optional-dependencies]
@@ -29,4 +30,7 @@ target-version = "py312"
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
-markers = ["live: calls the real Premier League APIs (set PLC_LIVE_TESTS=1)"]
+markers = [
+    "live: calls the real Premier League APIs (set PLC_LIVE_TESTS=1)",
+    "db: needs the compose Postgres (skipped when unreachable, except in CI)",
+]

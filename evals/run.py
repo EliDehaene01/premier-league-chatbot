@@ -120,7 +120,7 @@ def _error_result(case: dict, e: Exception) -> dict:
             "error": f"{type(e).__name__}: {e}"}  # fmt: skip
 
 
-def run(cases, now, max_cost=3.0, concurrency=4, use_judges=True, make_conn=get_connection,
+def run(cases, now, max_cost=3.0, concurrency=2, use_judges=True, make_conn=get_connection,
         make_provider=None, make_judge=None) -> tuple[list[dict], bool]:  # fmt: skip
     """Returns (results, stopped_by_cost_cap). Cases start only while spend is under max_cost."""
     make_provider = make_provider or (lambda conn: AzureOpenAIProvider(
@@ -287,7 +287,7 @@ def main(argv=None) -> int:
     ap.add_argument("--subset", help="only cases with this tag, e.g. smoke")
     ap.add_argument("--category")
     ap.add_argument("--max-cost-usd", type=float, default=3.0)
-    ap.add_argument("--concurrency", type=int, default=4)
+    ap.add_argument("--concurrency", type=int, default=2)
     ap.add_argument("--eval-date", help="ISO datetime that 'last weekend' etc. resolve against")
     ap.add_argument("--no-judges", action="store_true", help="skip the LLM judges")
     ap.add_argument("--baseline", help="an earlier result file to diff against in the report")

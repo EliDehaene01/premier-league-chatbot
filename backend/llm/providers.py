@@ -35,7 +35,9 @@ class LLMProvider(Protocol):
 
 
 class AzureOpenAIProvider:
-    """Azure OpenAI v1 API. Retries (429, 5xx, timeouts) use the SDK's exponential backoff.
+    """Azure OpenAI v1 API. Retries (429, 5xx, timeouts) use the SDK's exponential backoff,
+    which honours Retry-After; 8 retries because parallel eval runs hit the deployment's
+    per-minute token limit.
 
     GPT-5 family deployments reject `temperature` and `max_tokens`, so neither is sent;
     `max_completion_tokens` caps the answer (reasoning tokens count toward it).
@@ -53,7 +55,7 @@ class AzureOpenAIProvider:
         base = cfg.azure_openai_endpoint.rstrip("/")
         if not base.endswith("/openai/v1"):
             base += "/openai/v1"
-        self.client = OpenAI(base_url=base, api_key=cfg.azure_openai_api_key, max_retries=4)
+        self.client = OpenAI(base_url=base, api_key=cfg.azure_openai_api_key, max_retries=8)
         self.chat_deployment = chat_deployment or cfg.azure_openai_chat_deployment
         self.embedding_deployment = cfg.azure_openai_embedding_deployment
         self.conn = conn

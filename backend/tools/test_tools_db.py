@@ -68,6 +68,7 @@ def test_top_scorers_player_stats_and_compare(ctx):
 def test_club_info_and_head_to_head(ctx):
     info = run_tool(ctx, "get_club_info", {"club": "Arsenal"})
     assert info["stadium"] == "Emirates Stadium" and info["table"]["position"] == 1
+    assert {"won", "drawn", "lost", "goals_for", "goals_against"} <= info["table"].keys()
     assert info["form_last5_oldest_first"]["form"] == "W" and info["squad_size"] == 1
     assert info["next_fixture"]["home_club"] == "Coventry City"
     assert (
@@ -115,6 +116,7 @@ def test_match_lineup_with_events(ctx):
     )  # fmt: skip
     gk, fwd = arsenal["starting_xi_gk_to_attack"]
     assert gk["name"] == "David Raya" and fwd["captain"] and fwd["goals"] == ["15' Goal"]
+    assert (gk["row"], fwd["row"]) == (1, 2)  # formation rows the UI draws the pitch from
     (sub,) = arsenal["substitutes"]
     assert (sub["name"], sub["came_on"]) == ("Max Dowman", "68")
 

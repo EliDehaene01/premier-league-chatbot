@@ -56,6 +56,6 @@ docs/         # data_sources.md, adr/
 - [x] 1 Ingestion: bronze / silver / gold
 - [x] 2 RAG + tools + chat loop
 - [x] 3 Evals dataset (chat_v1, evaluators, runner, thresholds)
-- [ ] 4 API + React UI
+- [x] 4 API + React UI + structured citations
 - [ ] 5 Weekly digests + own MCP server. Mon 23:30 UTC ingest, Tue 05:00 UTC matchweek recap; Thu 23:00 UTC ingest, Fri 05:00 UTC news highlights; summaries published to GitHub Pages
 - [ ] 6 AI Ops: Langfuse tracing, CI eval gate, cost and latency dashboard, feedback loop

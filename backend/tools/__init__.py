@@ -206,6 +206,8 @@ def get_match_lineup(ctx, match_id=None, club=None, opponent=None, date=None) ->
         for p in (p for p in players if p["club_id"] == t["club_id"]):
             pid = p["player_id"]
             row = {"name": p["name"], "shirt": p["shirt_num"], "position": p["position"]}
+            if p["is_starter"]:  # formation row, 1 = goalkeeper; the UI draws the pitch from it
+                row["row"] = p["formation_row"]
             if p["is_captain"]:
                 row["captain"] = True
             for e in events:
@@ -282,8 +284,8 @@ def get_club_info(ctx, club: str) -> dict:
                       "WHERE club_id = %s", (club_id,))[0]  # fmt: skip
     standing = _rows(
         ctx,
-        "SELECT position, played, points, goal_difference, matchweek "
-        "FROM gold.league_table_current WHERE club_id = %s",
+        "SELECT position, played, won, drawn, lost, goals_for, goals_against, goal_difference, "
+        "points, matchweek FROM gold.league_table_current WHERE club_id = %s",
         (club_id,),
     )
     form = _rows(ctx, "SELECT form, points FROM gold.club_form_last5 WHERE club_id = %s",

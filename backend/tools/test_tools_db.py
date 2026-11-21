@@ -34,6 +34,9 @@ def test_league_table(ctx):
     assert [(r["position"], r["club"], r["points"]) for r in out["table"]] == [
         (1, "Arsenal", 3), (2, "Coventry City", 0),
     ]  # fmt: skip
+    assert out["leader"] == {"position": 1, "club": "Arsenal", "points": 3}
+    assert [r["club"] for r in out["top_four"]] == ["Arsenal", "Coventry City"]
+    assert out["relegation_zone"] == []  # a two-club table has no 18th place
     assert run_tool(ctx, "get_league_table", {"as_of_matchweek": 7})["available_matchweeks"] == [1]
 
 

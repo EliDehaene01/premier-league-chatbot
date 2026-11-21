@@ -77,13 +77,30 @@ def get_league_table(ctx: ToolContext, as_of_matchweek: int | None = None) -> di
         "WHERE s.matchweek = %s ORDER BY s.position",
         (mw,),
     )
-    out = {**_table_label(ctx, mw), "source_id": f"t{mw}", "table": table}
+    out = {**_table_label(ctx, mw), "source_id": f"t{mw}", **_zones(table), "table": table}
     if mw != snaps[-1]:
         out["newer_table"] = (
             f"this is an older table; call without as_of_matchweek for the current one "
             f"(stored under matchweek {snaps[-1]})"
         )
     return out
+
+
+RELEGATION_FROM = 18  # positions 18 to 20 go down
+
+
+def _zones(table: list[dict]) -> dict:
+    """The leader, top four and relegation zone spelled out, so an answer does not have to
+    pick them out of 20 rows (the model once listed the 17th club as in the bottom three)."""
+
+    def brief(r):
+        return {"position": r["position"], "club": r["club"], "points": r["points"]}
+
+    return {
+        "leader": brief(table[0]) if table else None,
+        "top_four": [brief(r) for r in table if r["position"] <= 4],
+        "relegation_zone": [brief(r) for r in table if r["position"] >= RELEGATION_FROM],
+    }
 
 
 def _table_label(ctx: ToolContext, mw: int) -> dict:

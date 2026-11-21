@@ -51,6 +51,7 @@ docs/         # data_sources.md, adr/
 - Digests: `python -m digests recap|news|publish` (see README); digest evals: `python -m evals.digests`
 - MCP server: `python -m mcp_server` (stdio) or `--http`; the chat uses it in-process unless `TOOL_TRANSPORT=direct`
 - Tools are defined once in `backend/tools`; the MCP server serves those schemas unchanged. Add a tool there, never only in `mcp_server`.
+- AI Ops: Langfuse `docker compose -f docker-compose.langfuse.yml up -d` (secrets via `python scripts/langfuse_env.py`); freshness `python -m backend.observability.freshness`; feedback loop `python -m evals.feedback review|promote|dismiss`. Tracing goes through `backend/observability/tracing.py` only, and must never break an answer. Tests blank the `LANGFUSE_*` settings.
 - Evals: `python -m evals.run --dataset chat_v1` (full, about $1) or `--subset smoke`; needs `pip install -e .[eval]`. Never lower `evals/thresholds.yaml` to get green.
 
 ## Current phase

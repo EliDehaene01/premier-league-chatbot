@@ -238,7 +238,28 @@ Every turn is stored in `chat_turns` (question, answer, tools, sources, prompt v
 
 ## AI Ops
 
-Self-hosted Langfuse tracing ([ADR 0005](docs/adr/0005-langfuse-for-tracing.md)), a CI eval gate, a cost and latency dashboard and a feedback loop. *Phase 6.*
+[ADR 0011](docs/adr/0011-ai-ops.md). Five parts, each usable without the others:
+
+- **Tracing** (`backend/observability/tracing.py`, self-hosted Langfuse v4 in `docker-compose.langfuse.yml`). One trace per chat turn, with the conversation as its session:
+
+  ```
+  chat_turn (agent)                     question in, answer + sources out, prompt version
+  ├─ llm:chat (generation)              model, tokens, cost
+  ├─ tool:search_news (tool)            arguments, result, transport mcp|direct
+  │  └─ mcp:search_news (tool)          the server side, joined via traceparent in _meta
+  │     ├─ retrieval (retriever)        query, filters, ranked articles
+  │     │  └─ embed:retrieval           tokens, cost
+  │     └─ prompt_shields (guardrail)   safe / flagged / error
+  └─ llm:chat (generation)              the answer
+  ```
+
+  Digest runs (`digest:recap`, `digest:news`) and eval cases are traced the same way; eval traces use the `eval` environment, are tagged with the run, and carry each check as a score. `chat_turns.trace_id` links a stored turn to its trace, and feedback becomes a `user_feedback` score on it. Without `LANGFUSE_*` keys nothing is sent.
+- **Freshness** (`backend/observability/freshness.py`): ingestion age, results missing after a fetch, table older than the latest result, newest article, unindexed articles, missing digests. Shown in `/api/health` and the header badge; stored after each scheduled ingestion.
+- **Dashboard** (`backend/observability/dashboard.py`): `ops.html` on the Pages site, rendered with every publish: spend per day and per area (chat, evals, digests, MCP clients, index), answer time, thumbs-up rate, eval runs (`eval_runs`, written by `evals/run.py`), freshness. Totals only.
+- **Feedback loop** (`evals/feedback.py`): `review` writes unreviewed thumbs-downs with tools, comment and trace link to `logs/`; `promote` turns one into a case in `feedback_v1.jsonl`; `dismiss` closes it.
+- **Eval gate** (`.github/workflows/eval-gate.yml`): on PRs touching llm, rag, prompts, tools, evals, digests or the MCP server, ingest the season into a throwaway Postgres, build the index and run the smoke subset against `evals/thresholds.yaml`. Skips with a warning when the Azure secrets are not set.
+
+The official table is stored under the matchweek active when it was fetched. `get_league_table` therefore reports the last *completed* matchweek (`backend/season.py`, shared with the system prompt and the recap) and, mid-matchweek, `matchweek_in_progress` with how many of its games are in.
 
 ## Frontend
 

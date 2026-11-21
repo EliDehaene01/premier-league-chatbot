@@ -1,0 +1,89 @@
+# Eval gate: a pull request that changes how the chatbot answers must still pass the smoke
+# evals (25 cases of chat_v1, thresholds in evals/thresholds.yaml, never lowered to pass).
+#
+# It needs the Azure keys as repository secrets (Settings > Secrets and variables > Actions):
+# AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, CONTENT_SAFETY_ENDPOINT, CONTENT_SAFETY_API_KEY,
+# and the variables AZURE_OPENAI_CHAT_DEPLOYMENT and AZURE_OPENAI_EMBEDDING_DEPLOYMENT.
+# GitHub never passes secrets to workflows from forks, so outside pull requests cannot spend
+# them. Without the secrets the job says so and skips. One run: the season is ingested into a
+# throwaway Postgres (goldens are SQL run at eval time), the news index is built (about $0.01)
+# and the smoke subset costs about $0.15, capped at $0.75.
+name: Eval gate
+
+on:
+  pull_request:
+    paths:
+      - "backend/llm/**"
+      - "backend/rag/**"
+      - "backend/prompts/**"
+      - "backend/tools/**"
+      - "evals/**"
+      - "digests/**"
+      - "mcp_server/**"
+  workflow_dispatch:
+
+concurrency:
+  group: eval-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke-evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: plc
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: plc
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U plc" --health-interval 5s --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://plc:ci-only@localhost:5432/plc
+      AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+      AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+      AZURE_OPENAI_CHAT_DEPLOYMENT: ${{ vars.AZURE_OPENAI_CHAT_DEPLOYMENT }}
+      AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${{ vars.AZURE_OPENAI_EMBEDDING_DEPLOYMENT }}
+      CONTENT_SAFETY_ENDPOINT: ${{ secrets.CONTENT_SAFETY_ENDPOINT }}
+      CONTENT_SAFETY_API_KEY: ${{ secrets.CONTENT_SAFETY_API_KEY }}
+    steps:
+      - name: Check the Azure secrets are configured
+        id: keys
+        run: |
+          if [ -n "$AZURE_OPENAI_API_KEY" ] && [ -n "$CONTENT_SAFETY_API_KEY" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Eval gate skipped: the Azure secrets are not set for this repository (or this is a fork)."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.keys.outputs.ok == 'true'
+      - uses: actions/setup-python@v5
+        if: steps.keys.outputs.ok == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+      - if: steps.keys.outputs.ok == 'true'
+        run: pip install -e ".[eval]"
+      - name: Ingest the current season
+        if: steps.keys.outputs.ok == 'true'
+        run: python -m ingestion backfill --summary ingest.json
+      - name: Build the news index
+        if: steps.keys.outputs.ok == 'true'
+        run: python -m backend.rag.build_index
+      - name: Smoke evals
+        if: steps.keys.outputs.ok == 'true'
+        run: python -m evals.run --subset smoke --max-cost-usd 0.75 --report eval-smoke.md
+      - name: Report
+        if: always() && steps.keys.outputs.ok == 'true'
+        run: cat eval-smoke.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.keys.outputs.ok == 'true'
+        with:
+          name: eval-smoke
+          path: |
+            eval-smoke.md
+            ingest.json

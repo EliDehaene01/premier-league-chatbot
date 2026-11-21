@@ -64,7 +64,9 @@ def gather(conn: psycopg.Connection, now: datetime | None = None, days: int = WI
     feedback = _rows(
         conn,
         "SELECT count(*) FILTER (WHERE rating = 'up') AS up, "
-        "count(*) FILTER (WHERE rating = 'down') AS down FROM feedback WHERE created_at >= %s",
+        "count(*) FILTER (WHERE rating = 'down') AS down, "
+        "count(*) FILTER (WHERE review_outcome = 'promoted') AS promoted "
+        "FROM feedback WHERE created_at >= %s",
         (since,),
     )[0]
     evals = _rows(
@@ -177,6 +179,7 @@ def render_body(data: dict) -> str:
         tile(
             pct(latest_eval["pass_rate"]) if latest_eval else "–", "eval pass rate, last full run"
         ),
+        tile(str(f["promoted"] or 0), "thumbs-down answers made eval cases"),
         "</div>",
         '<section class="card"><h2>Daily spend</h2>',
         cost_chart(data["daily_cost"]),

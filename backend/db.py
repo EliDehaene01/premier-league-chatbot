@@ -244,9 +244,6 @@ CREATE TABLE IF NOT EXISTS public.eval_runs (
     summary           jsonb NOT NULL
 );
 
--- Phase 6: the Langfuse trace of the turn, so feedback can be attached to it as a score
-ALTER TABLE public.chat_turns ADD COLUMN IF NOT EXISTS trace_id text;
-
 CREATE TABLE IF NOT EXISTS public.feedback (
     id              bigserial PRIMARY KEY,
     turn_id         uuid NOT NULL REFERENCES public.chat_turns,
@@ -259,6 +256,15 @@ CREATE TABLE IF NOT EXISTS public.feedback (
     prompt_version  text,
     created_at      timestamptz NOT NULL DEFAULT now()
 );
+
+-- Phase 6: the Langfuse trace of the turn, so feedback can be attached to it as a score
+ALTER TABLE public.chat_turns ADD COLUMN IF NOT EXISTS trace_id text;
+-- Phase 6 feedback loop (evals/feedback.py): a thumbs-down is promoted to an eval case or
+-- dismissed, once
+ALTER TABLE public.feedback ADD COLUMN IF NOT EXISTS reviewed_at timestamptz;
+ALTER TABLE public.feedback ADD COLUMN IF NOT EXISTS review_outcome text;
+ALTER TABLE public.feedback ADD COLUMN IF NOT EXISTS review_note text;
+ALTER TABLE public.feedback ADD COLUMN IF NOT EXISTS eval_case_id text;
 
 -- gold: what the chatbot's tools read
 -- weekly digests (matchweek recap, news highlights); a re-run adds a row, the newest one wins

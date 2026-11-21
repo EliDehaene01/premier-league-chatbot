@@ -72,6 +72,7 @@ def run_case(case, now, conn, provider, judge, use_judges=True) -> dict:
     turn = chat([*case.get("history", []), {"role": "user", "content": question}], ctx)
     latency_ms = int((time.monotonic() - started) * 1000)
     t = ev.transcript(question, turn.answer, turn.messages)
+    t["cited"], t["dropped"] = turn.sources, turn.dropped_markers
     rows = golden_rows(conn, case, now)
     prompt_numbers = ev.numbers(system_prompt(ctx, turn.prompt_version))
     judge_cost = 0.0
@@ -102,7 +103,7 @@ def run_case(case, now, conn, provider, judge, use_judges=True) -> dict:
         judge_cost = None if j["cost_usd"] is None else judge_cost + j["cost_usd"]
     return {
         "id": case["id"], "category": case["category"], "question": question,
-        "answer": turn.answer,
+        "answer": turn.answer, "sources": turn.sources, "dropped_markers": turn.dropped_markers,
         "tool_calls": [{"name": c["name"], "arguments": c["arguments"]} for c in t["calls"]],
         "checks": {k: v.as_dict() for k, v in checks.items()},
         "passed": bool(applicable) and all(applicable),

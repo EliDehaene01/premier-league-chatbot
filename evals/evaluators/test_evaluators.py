@@ -71,14 +71,19 @@ def test_no_ungrounded_numbers():
     assert no_ungrounded_numbers({}, t("Matchweek 11 is next"), {"11"}).passed
 
 
-def test_citation_precision_and_expected_article():
-    hit = {"url": "https://www.premierleague.com/en/news/4737123/fastest", "text": "..."}
-    case = {"golden": {"articles": [4737123]}}
-    good = t(f"Barnes. Source: Fastest players, 2026-11-09, {hit['url']}.", retrieved=[hit])
-    assert citation(case, good).passed
-    made_up = t("See https://www.premierleague.com/en/news/1/x", retrieved=[hit])
-    assert not citation(case, made_up).passed
-    assert not citation(case, t("no link", retrieved=[hit])).passed
+def test_citation_on_structured_sources():
+    art = {"n": 1, "id": "a4737123", "kind": "article", "title": "Fastest", "date": "2026-11-09",
+           "url": "https://www.premierleague.com/en/news/4737123/fastest"}  # fmt: skip
+    match = {"n": 2, "id": "m2645294", "kind": "match", "title": "Sunderland 1-0 Chelsea",
+             "date": "2026-11-08", "url": "https://example.com/m"}  # fmt: skip
+    news = {"category": "news", "golden": {"articles": [4737123]}}
+    assert citation(news, {**t("Barnes [1]"), "cited": [art], "dropped": []}).passed
+    invented = citation(news, {**t("Barnes [1]"), "cited": [art], "dropped": ["a1"]})
+    assert not invented.passed and "dropped" in invented.detail
+    assert not citation(news, {**t("x"), "cited": [], "dropped": []}).passed
+    assert not citation(news, {**t("x [1]"), "cited": [match], "dropped": []}).passed
+    why = {"category": "mixed_why", "golden": {}}
+    assert citation(why, {**t("1-0 [1]"), "cited": [match], "dropped": []}).passed
 
 
 def test_retrieval_rank():

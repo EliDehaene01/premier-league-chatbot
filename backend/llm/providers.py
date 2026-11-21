@@ -98,6 +98,43 @@ class AzureOpenAIProvider:
         ]
         return ChatResult(msg.content, calls, cost)
 
+    def chat_stream(self, messages, tools=None, on_delta=None, purpose="chat") -> ChatResult:
+        """Like chat(), but streams: on_delta(text) gets each content token as it arrives."""
+        started = time.monotonic()
+        kwargs: dict[str, Any] = {
+            "max_completion_tokens": self.max_completion_tokens,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if tools:
+            kwargs["tools"] = tools
+        content: list[str] = []
+        calls: dict[int, dict] = {}
+        model, usage = self.chat_deployment, None
+        for chunk in self.client.chat.completions.create(
+            model=self.chat_deployment, messages=messages, **kwargs
+        ):
+            model = chunk.model or model
+            usage = chunk.usage or usage
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta.content:
+                content.append(delta.content)
+                if on_delta:
+                    on_delta(delta.content)
+            for tc in delta.tool_calls or []:
+                c = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                c["id"] = tc.id or c["id"]
+                if tc.function:
+                    c["name"] += tc.function.name or ""
+                    c["arguments"] += tc.function.arguments or ""
+        cost = self._record("chat", model, self.chat_deployment, usage, started, purpose)
+        tool_calls = [
+            ToolCall(c["id"], c["name"], c["arguments"]) for _, c in sorted(calls.items())
+        ]
+        return ChatResult("".join(content) or None, tool_calls, cost)
+
     def embed(self, texts, purpose="embedding") -> list[list[float]]:
         started = time.monotonic()
         resp = self.client.embeddings.create(model=self.embedding_deployment, input=texts)

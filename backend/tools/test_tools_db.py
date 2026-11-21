@@ -77,13 +77,13 @@ def test_club_info_and_head_to_head(ctx):
 
 def test_search_news_filters_and_records_sources(ctx):
     out = run_tool(ctx, "search_news", {"query": "Arsenal beat Coventry"})
-    assert [r["article_id"] for r in out["results"]] == [4764661]  # fantasy excluded by default
-    assert out["results"][0]["url"].endswith("/4764661/arsenal-3-0-coventry")
+    assert [r["source_id"] for r in out["results"]] == ["a4764661"]  # fantasy excluded by default
+    assert out["results"][0]["source_id"] == "a4764661" and "url" not in out["results"][0]
     assert ctx.sources[0]["title"] == "Arsenal 3-0 Coventry"
     with_fpl = run_tool(ctx, "search_news", {"query": "FPL price changes", "include_fantasy": True})
-    assert 2884829 in [r["article_id"] for r in with_fpl["results"]]
+    assert "a2884829" in [r["source_id"] for r in with_fpl["results"]]
     by_club = run_tool(ctx, "search_news", {"query": "Arsenal", "club": "Arsenal"})
-    assert [r["article_id"] for r in by_club["results"]] == [4764661]
+    assert [r["source_id"] for r in by_club["results"]] == ["a4764661"]
     assert run_tool(ctx, "search_news", {"query": "Arsenal", "club": "Coventry"})["results"] == []
     old = run_tool(ctx, "search_news", {"query": "Arsenal", "days": 1})  # both are older
     assert old["results"] == [] and old["note"]

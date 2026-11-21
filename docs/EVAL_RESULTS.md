@@ -1,28 +1,28 @@
 # Eval results
 
-Dataset `chat_v1`, prompt `v2`, chat model `gpt-5.4-mini`, judge `gpt-5.4-mini`. Run 20261121T155251Z, eval date 2026-11-21T15:49:03.601879+00:00. Raw results: `evals/results/20261121T155251Z_chat_v1_v2.json` (not committed).
+Dataset `chat_v1`, prompt `v3`, chat model `gpt-5.4-mini`, judge `gpt-5.4-mini`. Run 20261121T161838Z, eval date 2026-11-21T16:15:37.469801+00:00. Raw results: `evals/results/20261121T161838Z_chat_v1_v3.json` (not committed).
 
-**165 cases, 79% passed.** Thresholds: all met.
+**165 cases, 82% passed.** Thresholds: **below threshold:** evaluator exact_answer 0.896 < 0.9; evaluator tool_selection 0.944 < 0.95; category ambiguity 0.667 < 0.8
 
-Cost: chat $0.7102, judges $0.2151. Latency per case: p50 1921 ms, p95 6196 ms. Errors: 0.
+Cost: chat $0.6488, judges $0.1751. Latency per case: p50 2081 ms, p95 4316 ms. Errors: 1.
 
 ## Per category
 
 | Category | Cases | Pass rate |
 |---|---|---|
-| ambiguity | 6 | 100% |
+| ambiguity | 6 | 67% |
 | betting | 5 | 100% |
 | club_info | 10 | 100% |
 | comparison | 10 | 100% |
-| fixtures_results | 20 | 95% |
+| fixtures_results | 20 | 85% |
 | head_to_head | 8 | 100% |
-| lineups | 6 | 67% |
-| mixed_why | 12 | 0% |
-| news | 26 | 35% |
-| off_topic | 5 | 100% |
+| lineups | 6 | 83% |
+| mixed_why | 12 | 58% |
+| news | 26 | 46% |
+| off_topic | 5 | 80% |
 | player_stats | 20 | 100% |
 | prompt_injection | 6 | 100% |
-| standings | 15 | 100% |
+| standings | 15 | 93% |
 | time_awareness | 10 | 80% |
 | unanswerable | 6 | 100% |
 
@@ -30,14 +30,14 @@ Cost: chat $0.7102, judges $0.2151. Latency per case: p50 1921 ms, p95 6196 ms. 
 
 | Evaluator | Applicable | Pass rate | Mean score |
 |---|---|---|---|
-| citation | 38 | 66% | 0.67 |
-| citation_support | 26 | 46% | 0.46 |
-| exact_answer | 135 | 93% | 0.94 |
-| groundedness | 38 | 97% | 0.92 |
-| guardrail | 30 | 97% | 0.97 |
-| no_ungrounded_numbers | 91 | 99% | 1.00 |
+| citation | 38 | 79% | 0.88 |
+| citation_support | 22 | 73% | 0.73 |
+| exact_answer | 135 | 90% | 0.91 |
+| groundedness | 38 | 100% | 0.92 |
+| guardrail | 29 | 93% | 0.93 |
+| no_ungrounded_numbers | 91 | 99% | 0.99 |
 | retrieval | 26 | 96% | 0.89 |
-| tool_selection | 142 | 96% | 0.95 |
+| tool_selection | 142 | 94% | 0.92 |
 
 Retrieval over the news cases: hit@5 0.96, MRR 0.89.
 
@@ -45,79 +45,52 @@ Retrieval over the news cases: hit@5 0.96, MRR 0.89.
 
 | Case | Question | Answer (start) | Failing checks |
 |---|---|---|---|
-| news-04 | Which assist put Declan Rice top of the Playmaker award race? | Declan Rice is top of the Playmaker race on 5 assists, but the tool data doesn’t say which specific assist was the one that moved him into first place.  What I  | **tool_selection**: missing [['search_news']]; mostly unexpected tools ['get_top_scorers', 'get_player_stats']; **exact_answer**: missing facts: ['Havertz']; **citation**: no article cited |
-| news-02 | Who is leading the Golden Glove race according to the Premier League? | The Golden Glove race is being led jointly by **Gabriel Magalhães (Arsenal), Bart Verbruggen (Brighton), and David Raya (Arsenal)**, each with **7 clean sheets* | **tool_selection**: missing [['search_news']]; mostly unexpected tools ['get_top_scorers']; **citation**: no article cited |
-| news-09 | Who won the Ballon d'Or? | I couldn’t find a Premier League article about the Ballon d’Or winner in the sources returned.  If you meant a specific player’s Ballon d’Or standing or a Premi | **exact_answer**: missing facts: ['Kane']; **citation**: no article cited |
-| news-21 | What is the latest injury news at Liverpool? | The latest Liverpool injury news I could find is limited, but the key update is positive: Virgil van Dijk, Ryan Gravenberch, Jeremie Frimpong and Dominik Szobos | **citation_support**: The cited article does say Van Dijk, Gravenberch, Frimpong and Szoboszlai should all be fine, but the answer wrongly attributes this to Live; **retrieval**: expected [4764715] not in top 5 |
-| news-23 | Which players visited schools for No Room For Racism? | I’m sorry, but news retrieval is unavailable right now, so I can’t verify which players visited schools for No Room For Racism. | **exact_answer**: missing facts: ['Hudson-Odoi']; **citation**: no article cited |
-| news-26 | How did Arsenal get on against Hull City? | Arsenal beat Hull City 1-0 at the Emirates Stadium in matchweek 10.  If you want, I can also pull the scorers, cards, and match details. | **tool_selection**: missing [['search_news']]; mostly unexpected tools ['get_head_to_head']; **citation**: no article cited |
-| mixed_why-02 | Why did Man City lose at Nottingham Forest? | Man City lost at Nottingham Forest because Forest turned the game into a tight, direct contest and punished them with a big individual performance from their st | **groundedness**: 2/5: Let's think step by step: The response is grounded in the provided context in that it correctly references the available match report t; **citation_support**: The cited article only states that a former Man City striker scored twice and Forest won 3-1 to move out of the relegation zone; it does not |
-| mixed_why-03 | Why did Arsenal win at Liverpool? | Arsenal won at Liverpool because they scored early and then protected the lead well.  What the match data shows: - Kai Havertz scored in the 16th minute, assist | **exact_answer**: not found: ['0, 1']; **citation**: no article cited |
-| mixed_why-11 | Why are Arsenal top of the league? | Arsenal are top because they’ve started strongly and are winning the key numbers:  - **1st place** after **10 played**, with **27 points** - **Goal difference:  | **tool_selection**: missing [['search_news']]; mostly unexpected tools ['get_club_info', 'get_top_scorers', 'get_top_scorers', 'get_top_scorers']; **citation**: no article cited |
-| mixed_why-12 | Why are Brighton doing so well this season? | Brighton are doing so well because they’ve combined strong results, a high goal difference, and some big individual moments.  What the data shows: - They’re **2 | **no_ungrounded_numbers**: numbers not in any tool result: ['15']; **citation_support**: The Brighton win and Gomez goal citations support those specific claims, but the answer also attributes league position, points, goal differ |
+| news-04 | Which assist put Declan Rice top of the Playmaker award race? | Declan Rice is top of the Playmaker race with 5 assists [1]. | **tool_selection**: missing [['search_news']]; mostly unexpected tools ['get_top_scorers']; **exact_answer**: missing facts: ['Havertz']; **citation**: none of the expected articles [4737173] cited (cited []); news answer cites no article |
+| news-09 | Who won the Ballon d'Or? | The Premier League article I found is about the Golden Boot and Golden Glove, not the Ballon d’Or [1][2]. I don’t have a Ballon d’Or winner in the available Pre | **exact_answer**: missing facts: ['Kane']; **citation**: none of the expected articles [4749936] cited (cited ['a4737300', 'a4737165']); **citation_support**: The cited articles only discuss the Premier League Golden Boot and Golden Glove, and do not support any claim about Ballon d’Or coverage or  |
+| news-16 | How did Haaland do for Norway in the international break? | I can give you his Premier League season stats, but I can’t tell how Haaland did for Norway in the international break from the data available here. His season  | **tool_selection**: missing [['search_news']]; mostly unexpected tools ['get_player_stats']; **exact_answer**: missing facts: ['Denmark', '96']; **citation**: none of the expected articles [4763580] cited (cited []); news answer cites no article |
+| news-01 | How does Arsenal's start compare with the best ever Premier League starts? | Arsenal’s start is excellent, but I can’t fairly compare it to the **best ever Premier League starts** from the data I have here, because I only have the curren | **tool_selection**: missing [['search_news']]; **citation**: none of the expected articles [4762992] cited (cited []); news answer cites no article |
+| news-02 | Who is leading the Golden Glove race according to the Premier League? | Gabriel Magalhães, Bart Verbruggen and David Raya are currently tied for the Golden Glove lead with 7 clean sheets each [1]. | **tool_selection**: missing [['search_news']]; mostly unexpected tools ['get_top_scorers']; **citation**: none of the expected articles [4737165] cited (cited []); news answer cites no article |
+| news-20 | What are some memorable moments from Liverpool v Man Utd? | This season’s Liverpool v Manchester United meetings are both still to be played, so there aren’t any 2026-27 match highlights to recall yet [1][2].  If you wan | **tool_selection**: missing [['search_news']]; mostly unexpected tools ['get_head_to_head']; **citation**: none of the expected articles [4214335] cited (cited []); news answer cites no article |
+| news-25 | What did we learn from Man Utd's defeat to Bournemouth? | I couldn’t find a relevant official Premier League “what we learned” article about Man Utd’s defeat to Bournemouth in the news results I searched.  If you want, | **exact_answer**: missing facts: ['Fernandes']; **citation**: nothing cited |
+| news-26 | How did Arsenal get on against Hull City? | Arsenal beat Hull City 1-0 at the Emirates Stadium [1]. | **tool_selection**: missing [['search_news']]; mostly unexpected tools ['get_results']; **citation**: none of the expected articles [4757016] cited (cited []); news answer cites no article |
+| mixed_why-06 | Why did Newcastle lose to Everton? | Newcastle lost because Everton scored early in the second half and then protected the lead well. Thierno Barry’s goal in the 49th minute was the only goal [1].  | **exact_answer**: not found: ['0, 1']; **citation_support**: Article [2] supports that Joelinton was out, Jacob Ramsey returned from suspension, and Yoane Wissa was an option from the bench, but it doe |
+| standings-15 | How many league games have Spurs won this season? | Spurs have won 3 league games this season [1]. | **no_ungrounded_numbers**: numbers not in any tool result: ['3'] |
 
 ## Compared with the previous run
 
-Comparing `evals/results/20261121T155251Z_chat_v1_v2.json` against `evals/results/20261121T154436Z_chat_v1_v1.json`.
+Comparing `evals/results/20261121T161838Z_chat_v1_v3.json` against `evals/results/20261121T155251Z_chat_v1_v2.json`.
 
-Overall pass rate: 76% -> 79%
+Overall pass rate: 79% -> 82%
 
 | Category | Before | After | Change |
 |---|---|---|---|
-| ambiguity | 67% | 100% | +33 pts |
+| ambiguity | 100% | 67% | -33 pts |
 | betting | 100% | 100% | +0 pts |
 | club_info | 100% | 100% | +0 pts |
 | comparison | 100% | 100% | +0 pts |
-| fixtures_results | 85% | 95% | +10 pts |
+| fixtures_results | 95% | 85% | -10 pts |
 | head_to_head | 100% | 100% | +0 pts |
-| lineups | 67% | 67% | +0 pts |
-| mixed_why | 0% | 0% | +0 pts |
-| news | 31% | 35% | +4 pts |
-| off_topic | 80% | 100% | +20 pts |
+| lineups | 67% | 83% | +17 pts |
+| mixed_why | 0% | 58% | +58 pts |
+| news | 35% | 46% | +12 pts |
+| off_topic | 100% | 80% | -20 pts |
 | player_stats | 100% | 100% | +0 pts |
 | prompt_injection | 100% | 100% | +0 pts |
-| standings | 100% | 100% | +0 pts |
+| standings | 100% | 93% | -7 pts |
 | time_awareness | 80% | 80% | +0 pts |
 | unanswerable | 100% | 100% | +0 pts |
 
 | Evaluator | Before | After |
 |---|---|---|
-| citation | 47% | 66% |
-| citation_support | 50% | 46% |
-| exact_answer | 90% | 93% |
-| groundedness | 95% | 97% |
-| guardrail | 87% | 97% |
-| no_ungrounded_numbers | 100% | 99% |
+| citation | 66% | 79% |
+| citation_support | 46% | 73% |
+| exact_answer | 93% | 90% |
+| groundedness | 97% | 100% |
+| guardrail | 97% | 93% |
+| no_ungrounded_numbers | 99% | 99% |
 | retrieval | 96% | 96% |
-| tool_selection | 88% | 96% |
+| tool_selection | 96% | 94% |
 
-Now passing (11): ambiguity-01, ambiguity-03, fixtures_results-02, fixtures_results-07, lineups-05, news-10, news-12, news-13, news-15, off_topic-02, time_awareness-03
+Now passing (12): lineups-06, mixed_why-01, mixed_why-02, mixed_why-03, mixed_why-04, mixed_why-05, mixed_why-07, mixed_why-08, news-11, news-17, news-23, news-24
 
-Newly failing (5): lineups-04, news-08, news-23, news-24, time_awareness-10
-
-## How we got here
-
-| Run | Prompt | Dataset | Pass rate | Cost (chat + judges) |
-|---|---|---|---|---|
-| 1, first full run | v1 | chat_v1 as written | 76% | $0.77 |
-| 2, dataset expectations corrected | v1 text | chat_v1 | 78% | $0.74 |
-| 3, this report | v2 | chat_v1 | 79% | $0.93 |
-| Smoke subset (25 cases) | v2 | chat_v1, tag smoke | 80% | $0.16 |
-
-Total spent on eval runs for this phase, including two trial runs on the smoke subset: about $2.70.
-
-**Fixed between runs**
-- Prompt Shields rejected batches of more than 5 documents with a 400, so search_news failed closed (correctly) and dropped all news whenever the model asked for more than 5 results. The batching now respects both service limits (5 documents, 10,000 characters per call). This was a Phase 2 bug the evals found.
-- `get_results` gained `oldest_first`, so "first match of the season" no longer returns the latest match.
-- Prompt v2 (`backend/prompts/system_v2.md`): what search_news covers (referees, awards, previews, the match ball), try search_news before saying something is unavailable, cite only links search_news returned, say when no relevant article was found, never pick an ambiguous name silently, decline even quick off-topic requests, and double-check totals.
-- Dataset corrections after the first run (see `evals/datasets/README.md`): `get_club_info` accepted for "next match" questions because it returns the next fixture; data tools allowed in two news questions that also ask for numbers; "Which matchweek is next?" reworded, as it was ambiguous mid-matchweek.
-
-**Remaining failures (not hidden, not thresholded away)**
-- **mixed_why 0%.** The answers explain the result correctly from match data, but the citation checks fail. The model often builds a match-centre URL itself (`/en/match/<id>`) despite the prompt, or cites nothing. And `citation_support` treats every claim in the answer as attributed to the cited article, including minutes and scorers that came from `get_match_details`. Fixing this properly means per-claim citation markers in the answer format, which belongs with the UI work in Phase 4.
-- **news 35%.** The answers are mostly right, with retrieval hit@5 0.96, but `citation_support` is strict: it fails an answer if any detail goes beyond the cited chunk. A few questions are still answered from stats tools instead of search_news: the Golden Glove race, the Playmaker race, Arsenal v Hull. Some fact checks miss paraphrases: "from his own half" for "halfway", and no 96th minute.
-- **Arithmetic:** "How many goals were scored in matchweek 10?" was answered as 22 from ten per-match totals that add up to 30.
-- **Ambiguity:** "What was United's starting line-up last weekend?" still assumed Manchester United silently in this run (it passed in run 2).
-- **Time awareness:** "results in the last matchweek" was answered with the matchweek in progress instead of the last completed one.
-- **The smoke subset is below four evaluator minimums** (groundedness, retrieval, hit@5, MRR), because they are measured over only 4 to 6 cases there. It needs its own thresholds before it can gate PRs (Phase 6, CI eval gate).
-
-Judges use the same gpt-5.4-mini deployment that answers, so they may be lenient with its style (self-preference). Set `EVAL_JUDGE_DEPLOYMENT` to a stronger model to cross-check.
+Newly failing (7): ambiguity-01, ambiguity-06, fixtures_results-01, fixtures_results-07, news-15, off_topic-02, standings-15
